@@ -107,4 +107,21 @@ class DistributionController extends Controller
             'notes' => 'nullable|string',
         ]);
     }
+    public function history(): JsonResponse
+{
+    $distributions = Distribution::query()
+        ->with([
+            'resource:id,name,unit',
+            'additionalResource:id,name,unit',
+            'location:id,name',
+            'distributor:id,name',
+        ])
+        ->where('status', 'completed')
+        ->orderByDesc('updated_at')
+        ->get();
+
+    return response()->json([
+        'distributions' => $distributions,
+    ]);
+}
 }

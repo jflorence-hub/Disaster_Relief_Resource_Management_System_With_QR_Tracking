@@ -10,11 +10,24 @@ use Illuminate\Support\Facades\DB;
 
 class DistributionController extends Controller
 {
-    /**
-     * Look up a family's distribution record by its QR code, so field
-     * staff can check whether — and what — a family has already received
-     * before handing out more relief.
-     */
+   /**
+ * Return completed family relief distributions for scanner history.
+ */
+public function history(): JsonResponse
+{
+    $distributions = Distribution::with([
+        'resource:id,name,unit',
+        'additionalResource:id,name,unit',
+        'location:id,name',
+    ])
+        ->where('status', 'completed')
+        ->orderByDesc('distribution_date')
+        ->get();
+
+    return response()->json([
+        'distributions' => $distributions,
+    ]);
+}
     public function lookup(Request $request): JsonResponse
     {
         $request->validate(['qr_code' => 'required|string']);

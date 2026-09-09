@@ -13,13 +13,11 @@ Route::post('login', [AuthController::class, 'login']);
 Route::middleware('auth.token')->group(function () {
     Route::get('me', [AuthController::class, 'me']);
     Route::post('logout', [AuthController::class, 'logout']);
-
+    Route::get('/distributions/history', [DistributionController::class, 'history']);
     Route::post('qr/lookup', [QrTrackingController::class, 'lookup']);
     Route::post('qr/scan', [QrTrackingController::class, 'store']);
     Route::get('qr/scans', [QrTrackingController::class, 'index']);
-
     Route::post('distributions/lookup', [DistributionController::class, 'lookup']);
     Route::post('distributions/confirm', [DistributionController::class, 'confirm']);
-
     Route::get('locations', [LocationController::class, 'index']);
 });
