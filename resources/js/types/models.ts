@@ -67,7 +67,7 @@ export interface QrScan {
     id: number;
     resource_id: number;
     location_id: number | null;
-    scanned_by: number | null;
+    scanned_by: number;
     scan_type: 'check_in' | 'check_out' | 'audit' | 'transfer';
     recipient_name: string | null;
     quantity_change: number;
