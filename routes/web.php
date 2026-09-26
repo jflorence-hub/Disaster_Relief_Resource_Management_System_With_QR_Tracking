@@ -10,6 +10,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ResourceController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\TeamController;
+use App\Http\Controllers\FamilyController;
 use Illuminate\Support\Facades\Route;
 
 Route::inertia('/', 'welcome')->name('home');
@@ -31,6 +32,9 @@ Route::middleware('auth')->group(function () {
 
     Route::resource('locations', LocationController::class)
         ->only(['index', 'store', 'update', 'destroy']);
+
+    Route::resource('families', FamilyController::class)
+    ->only(['index', 'store', 'update', 'destroy']);
 
     Route::resource('resources', ResourceController::class)
         ->only(['index', 'store', 'update', 'destroy']);

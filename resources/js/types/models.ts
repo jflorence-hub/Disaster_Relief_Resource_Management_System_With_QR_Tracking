@@ -43,6 +43,16 @@ export interface ResourceItem {
 }
 
 export interface Distribution {
+    family_id?: number | null;
+    family?: {
+    id: number;
+    family_id: string;
+    family_name: string;
+    head_name: string;
+    phone?: string | null;
+    beneficiary_count: number;
+    purok_id: number;
+    };
     id: number;
     qr_code: string | null;
     resource_id: number;
@@ -87,5 +97,6 @@ export interface TeamMember {
     status: 'active' | 'on_leave' | 'inactive';
     location_id: number | null;
     responsibilities: string | null;
+    purok_id: number;
     location?: { id: number; name: string } | null;
 }

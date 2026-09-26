@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Str;
+use App\Models\Family;
 
 class Distribution extends Model
 {
@@ -15,7 +16,7 @@ class Distribution extends Model
         'resource_id', 'additional_resource_id', 'location_id', 'distributed_by',
         'quantity', 'additional_quantity',
         'recipient_name', 'recipient_contact', 'beneficiary_count',
-        'distribution_date', 'status', 'notes',
+        'distribution_date', 'status', 'notes', 'family_id'
     ];
 
     protected function casts(): array
@@ -35,6 +36,12 @@ class Distribution extends Model
                 $distribution->qr_code = 'DIST-'.strtoupper(Str::random(10));
             }
         });
+    }
+
+    
+    public function family(): BelongsTo
+    {
+    return $this->belongsTo(Family::class);
     }
 
     public function resource(): BelongsTo

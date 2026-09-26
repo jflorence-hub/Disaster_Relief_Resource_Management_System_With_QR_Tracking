@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Inertia\Inertia;
 use Inertia\Response;
+use App\Models\Purok;
 
 class TeamController extends Controller
 {
@@ -31,6 +32,10 @@ class TeamController extends Controller
             'members' => $members,
             'locations' => Location::select('id', 'name')->orderBy('name')->get(),
             'filters' => $request->only(['search', 'role', 'status']),
+            'puroks' => Purok::select('id', 'name', 'code')
+                     ->where('status', 'active')
+                     ->orderBy('name')
+                     ->get(),
         ]);
     }
 
@@ -45,6 +50,7 @@ class TeamController extends Controller
             'status' => 'required|in:active,on_leave,inactive',
             'location_id' => 'nullable|exists:locations,id',
             'responsibilities' => 'nullable|string|max:255',
+            'purok_id' => 'nullable|exists:puroks,id',
         ]);
 
         $data['password'] = Hash::make($data['password']);
@@ -65,6 +71,7 @@ class TeamController extends Controller
             'status' => 'required|in:active,on_leave,inactive',
             'location_id' => 'nullable|exists:locations,id',
             'responsibilities' => 'nullable|string|max:255',
+            'purok_id' => 'nullable|exists:puroks,id',
         ]);
 
         if (! empty($data['password'])) {

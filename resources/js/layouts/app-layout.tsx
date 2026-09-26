@@ -2,6 +2,7 @@ import { Link, router, usePage } from '@inertiajs/react';
 import {
     Bell,
     FileText,
+    House,
     LayoutDashboard,
     LogOut,
     MapPin,
@@ -24,6 +25,7 @@ const navItems = [
     { href: '/locations', label: 'Locations', icon: MapPin, adminOnly: false },
     { href: '/reports', label: 'Reports', icon: FileText, adminOnly: false },
     { href: '/team', label: 'Team Management', icon: Users, adminOnly: true },
+    { href: '/families', label: 'Families', icon: House, adminOnly: false },
     { href: '/settings', label: 'Settings', icon: Settings, adminOnly: true },
 ];
 

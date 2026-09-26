@@ -23,6 +23,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureUserIsAdmin::class,
             'auth.token' => \App\Http\Middleware\AuthenticateApiToken::class,
+            'auth.staff' => \App\Http\Middleware\EnsureStaffApiToken::class,
+            'auth.family' => \App\Http\Middleware\AuthenticateFamilyApiToken::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

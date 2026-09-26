@@ -16,6 +16,9 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        $this->call([
+        PurokSeeder::class,
+        ]);
         // --- System settings -------------------------------------------------
         Setting::set('app_name', 'Disaster Relief Resource Management');
         Setting::set('organization_contact_email', 'ops@disasterrelief.test');
