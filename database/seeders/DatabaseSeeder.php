@@ -116,7 +116,7 @@ class DatabaseSeeder extends Seeder
                 'additional_quantity' => $additionalResource ? rand(1, 5) : null,
                 'recipient_name' => $recipients[array_rand($recipients)],
                 'recipient_contact' => '+63 9'.rand(10, 99).' '.rand(100, 999).' '.rand(1000, 9999),
-                'beneficiary_count' => rand(1, 8),
+                'household_member' => rand(1, 8),
                 'distribution_date' => now()->subDays(rand(0, 60)),
                 'status' => $status,
                 'notes' => $hasAdditional ? 'Family requested additional medicine for a sick member.' : null,

@@ -61,7 +61,7 @@ export default function Welcome() {
                         <Truck className="mb-3 text-blue-600" size={28} />
                         <h3 className="font-semibold text-slate-800">Distribution</h3>
                         <p className="mt-1 text-sm text-slate-500">
-                            Log deliveries to recipients and monitor beneficiaries served.
+                            Log deliveries to recipients and monitor household member served.
                         </p>
                     </div>
                 </div>

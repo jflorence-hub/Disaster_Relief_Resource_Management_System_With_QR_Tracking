@@ -10,7 +10,7 @@ interface Stats {
     low_stock_count: number;
     pending_distributions: number;
     completed_distributions: number;
-    beneficiaries_served: number;
+    household_member_served: number;
     total_scans: number;
     active_team_members: number;
 }
@@ -41,7 +41,7 @@ export default function Dashboard({
         { label: 'Low Stock Items', value: stats.low_stock_count, icon: AlertTriangle, color: 'bg-amber-50 text-amber-600' },
         { label: 'Pending / In Transit', value: stats.pending_distributions, icon: Truck, color: 'bg-slate-100 text-slate-600' },
         { label: 'Completed Distributions', value: stats.completed_distributions, icon: CheckCircle2, color: 'bg-emerald-50 text-emerald-600' },
-        { label: 'Beneficiaries Served', value: stats.beneficiaries_served.toLocaleString(), icon: Users, color: 'bg-blue-50 text-blue-600' },
+        { label: 'Household Member Served', value: stats.household_member_served.toLocaleString(), icon: Users, color: 'bg-blue-50 text-blue-600' },
         { label: 'QR Scans Logged', value: stats.total_scans.toLocaleString(), icon: QrCode, color: 'bg-purple-50 text-purple-600' },
         { label: 'Active Team Members', value: stats.active_team_members, icon: Users, color: 'bg-emerald-50 text-emerald-600' },
     ];

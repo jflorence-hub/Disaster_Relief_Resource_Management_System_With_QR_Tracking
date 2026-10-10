@@ -44,7 +44,7 @@ every module.
    responsibilities, assigned location.
 7. **Location Management** — register/update relief locations, operational
    status (Active/Inactive/Under maintenance), resource delivery summary
-   per location (items stocked, deliveries completed, beneficiaries
+   per location (items stocked, deliveries completed, household member
    served).
 8. **Reports** — inventory, distribution, and QR-tracking reports on
    screen, each with a **CSV export** button; low-stock watchlist,

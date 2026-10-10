@@ -19,7 +19,7 @@ class DashboardController extends Controller
             'low_stock_count' => Resource::whereColumn('quantity', '<=', 'minimum_threshold')->count(),
             'pending_distributions' => Distribution::whereIn('status', ['pending', 'in_transit'])->count(),
             'completed_distributions' => Distribution::where('status', 'completed')->count(),
-            'beneficiaries_served' => (int) Distribution::where('status', 'completed')->sum('beneficiary_count'),
+            'household_member_served' => (int) Distribution::where('status', 'completed')->sum('household_member'),
             'total_scans' => QrScan::count(),
             'active_team_members' => \App\Models\User::where('status', 'active')->count(),
         ];

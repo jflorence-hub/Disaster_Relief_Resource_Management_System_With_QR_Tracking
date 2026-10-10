@@ -1,69 +1,21 @@
+import AppLayout from '@/layouts/app-layout';
 import ConfirmDialog from '@/components/confirm-dialog';
 import Modal from '@/components/modal';
-import AppLayout from '@/layouts/app-layout';
 import { Distribution, Location, ResourceItem } from '@/types/models';
 import { Head, router, useForm } from '@inertiajs/react';
 import {
-    ChevronDown,
+    CheckCircle2,
+    Clock3,
     Download,
     Pencil,
-    Plus,
     QrCode,
     Search,
     Trash2,
     Truck,
-    UserCog,
+    Users,
 } from 'lucide-react';
-import {
-    FormEventHandler,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-} from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
-
-const CATEGORY_LABELS: Record<string, string> = {
-    food: 'Food',
-    water: 'Drinks',
-    medical: 'Medicine',
-    clothing: 'Clothes',
-    tools: 'Tool',
-    hygiene: 'Hygiene',
-    set: 'Set',
-    shelter: 'Shelter',
-    other: 'Other',
-};
-
-const CATEGORY_ORDER = [
-    'food',
-    'water',
-    'medical',
-    'clothing',
-    'tools',
-    'hygiene',
-    'set',
-    'shelter',
-    'other',
-];
-
-interface FormData {
-    resource_id: string;
-    resource_category: string;
-    additional_resource_id: string;
-    additional_resource_category: string;
-    has_additional: boolean;
-    location_id: string;
-    quantity: number | string;
-    additional_quantity: number | string;
-    recipient_name: string;
-    recipient_contact: string;
-    beneficiary_count: number | string;
-    distribution_date: string;
-    status: string;
-    notes: string;
-    family_id: string;
-}
 
 interface Family {
     id: number;
@@ -71,10 +23,11 @@ interface Family {
     family_name: string;
     head_name: string;
     phone?: string | null;
-    beneficiary_count: number;
+    household_member: number;
     address?: string | null;
     purok_id: number;
     status: string;
+
     purok?: {
         id: number;
         name: string;
@@ -87,29 +40,37 @@ interface Staff {
     purok_id?: number | null;
 }
 
+interface DistributionRow {
+    family: Family;
+    distribution: Distribution;
+    reliefName: string;
+    quantity: number;
+    date: string;
+    status: string;
+}
+
+interface FormData {
+    family_id: number | string;
+    resource_id: number | string;
+    quantity: number | string;
+    additional_resource_id: number | string;
+    additional_quantity: number | string;
+    location_id: number | string;
+    distribution_date: string;
+    status: string;
+    notes: string;
+}
+
 const emptyForm: FormData = {
-    resource_id: '',
-    resource_category: '',
-    additional_resource_id: '',
-    additional_resource_category: '',
-    has_additional: false,
-    location_id: '',
     family_id: '',
+    resource_id: '',
     quantity: 1,
-    additional_quantity: 1,
-    recipient_name: '',
-    recipient_contact: '',
-    beneficiary_count: '',
-    distribution_date: new Date().toISOString().slice(0, 16),
+    additional_resource_id: '',
+    additional_quantity: 0,
+    location_id: '',
+    distribution_date: '',
     status: 'pending',
     notes: '',
-};
-
-const statusBadge: Record<string, string> = {
-    completed: 'badge-green',
-    pending: 'badge-slate',
-    in_transit: 'badge-amber',
-    cancelled: 'badge-red',
 };
 
 export default function DistributionPage({
@@ -119,6 +80,8 @@ export default function DistributionPage({
     filters,
     staff = [],
     families = [],
+    currentDate,
+    defaultSetResource,
 }: {
     distributions: Distribution[];
     resources: ResourceItem[];
@@ -129,88 +92,102 @@ export default function DistributionPage({
     };
     staff: Staff[];
     families: Family[];
+    currentDate: string;
+    defaultSetResource?: ResourceItem | null;
 }) {
     const [search, setSearch] = useState(filters.search ?? '');
+    const [selectedStaffId, setSelectedStaffId] = useState('');
 
-    const [showForm, setShowForm] = useState(false);
+    // ============================================================
+    // CRUD STATE
+    // ============================================================
 
-    const [editing, setEditing] = useState<Distribution | null>(null);
+    const [editingFamily, setEditingFamily] = useState<Family | null>(null);
+
+    const [editingDistribution, setEditingDistribution] =
+        useState<Distribution | null>(null);
 
     const [deleting, setDeleting] = useState<Distribution | null>(null);
 
-    const [qrDistribution, setQrDistribution] =
-        useState<Distribution | null>(null);
+    // ============================================================
+    // QR STATE
+    // ============================================================
 
-    const [selectedStaffId, setSelectedStaffId] = useState('');
+    const [qrDistribution, setQrDistribution] = useState<Distribution | null>(
+        null,
+    );
 
     const qrRef = useRef<HTMLDivElement>(null);
 
     const form = useForm<FormData>(emptyForm);
 
-    /*
-    |--------------------------------------------------------------------------
-    | Refresh families automatically
-    |--------------------------------------------------------------------------
-    |
-    | This allows a newly registered family from the Families page to appear
-    | on the Distribution page without manually refreshing the browser.
-    |
-    */
+    // ============================================================
+    // BUILD DISTRIBUTION ROWS
+    // ============================================================
 
-    useEffect(() => {
-        const interval = window.setInterval(() => {
-            router.reload({
-                only: ['families', 'staff', 'resources']
+    const distributionRows = useMemo<DistributionRow[]>(() => {
+        const latestDistributionByFamily = new Map<number, Distribution>();
+
+        distributions.forEach((distribution) => {
+            if (
+                distribution.family_id === null ||
+                distribution.family_id === undefined
+            ) {
+                return;
+            }
+
+            // Make sure the family ID is always treated as a number.
+            const familyId = Number(distribution.family_id);
+
+            if (!Number.isFinite(familyId)) {
+                return;
+            }
+
+            const existing = latestDistributionByFamily.get(familyId);
+
+            if (
+                !existing ||
+                new Date(distribution.distribution_date).getTime() >
+                    new Date(existing.distribution_date).getTime()
+            ) {
+                latestDistributionByFamily.set(familyId, distribution);
+            }
+        });
+
+        const rows: DistributionRow[] = [];
+
+        families.forEach((family) => {
+            const distribution = latestDistributionByFamily.get(family.id);
+
+            // Every registered family should have
+            // a real distribution record.
+            if (!distribution) {
+                return;
+            }
+
+            rows.push({
+                family,
+                distribution,
+                reliefName:
+                    distribution.resource?.name ??
+                    defaultSetResource?.name ??
+                    'Set of Goods and Needs',
+                quantity: Number(distribution.quantity ?? 1),
+                date: distribution.distribution_date,
+                status: distribution.status,
             });
-        }, 5000);
+        });
 
-        return () => {
-            window.clearInterval(interval);
-        };
-    }, []);
+        return rows;
+    }, [families, distributions, defaultSetResource]);
 
-    /*
-    |--------------------------------------------------------------------------
-    | Default Resource
-    |--------------------------------------------------------------------------
-    |
-    | The distribution list should show "Set of Goods" as the default
-    | resource. We look for it by name.
-    |
-    */
+    // ============================================================
+    // STAFF / PUROK FILTER
+    // ============================================================
 
-    const defaultResource = useMemo(() => {
-        return (
-            resources.find(
-                (resource) =>
-                    resource.name.trim().toLowerCase() === 'set of goods',
-            ) ?? resources[0]
-        );
-    }, [resources]);
-
-    /*
-    |--------------------------------------------------------------------------
-    | Families for selected Staff/Purok
-    |--------------------------------------------------------------------------
-    |
-    | IMPORTANT:
-    | Families are now the source of the Distribution list.
-    |
-    | If no staff is selected:
-    |     show ALL active families.
-    |
-    | If a staff member is selected:
-    |     show only families from that staff member's Purok.
-    |
-    */
-
-    const availableFamilies = useMemo(() => {
-        const activeFamilies = families.filter(
-            (family) => family.status === 'active',
-        );
-
+    const filteredByStaff = useMemo(() => {
         if (!selectedStaffId) {
-            return activeFamilies;
+            return distributionRows;
         }
 
         const selectedStaff = staff.find(
@@ -221,1163 +198,819 @@ export default function DistributionPage({
             return [];
         }
 
-        return activeFamilies.filter(
-            (family) => family.purok_id === selectedStaff.purok_id,
+        return distributionRows.filter(
+            (row) =>
+                Number(row.family.purok_id) === Number(selectedStaff.purok_id),
         );
-    }, [families, staff, selectedStaffId]);
+    }, [distributionRows, selectedStaffId, staff]);
 
-    /*
-    |--------------------------------------------------------------------------
-    | Search Families
-    |--------------------------------------------------------------------------
-    */
+    // ============================================================
+    // SEARCH
+    // ============================================================
 
+    const filteredRows = useMemo(() => {
+        const value = search.trim().toLowerCase();
 
-    const filteredFamilies = useMemo(() => {
-        const query = search.trim().toLowerCase();
-
-        if (!query) {
-            return availableFamilies;
+        if (!value) {
+            return filteredByStaff;
         }
 
-        return availableFamilies.filter((family) => {
+        return filteredByStaff.filter((row) => {
+            const family = row.family;
+
             return (
-                family.family_name.toLowerCase().includes(query) ||
-                family.family_id.toLowerCase().includes(query) ||
-                family.head_name.toLowerCase().includes(query) ||
-                family.purok?.name?.toLowerCase().includes(query)
+                family.family_id.toLowerCase().includes(value) ||
+                family.family_name.toLowerCase().includes(value) ||
+                family.head_name.toLowerCase().includes(value) ||
+                family.purok?.name?.toLowerCase().includes(value)
             );
         });
-    }, [availableFamilies, search]);
+    }, [search, filteredByStaff]);
 
-    /*
-    |--------------------------------------------------------------------------
-    | Filter Existing Distribution Records
-    |--------------------------------------------------------------------------
-    |
-    | This is still used by the actual distribution history.
-    |
-    */
+    // ============================================================
+    // STATUS
+    // ============================================================
 
-    const filteredDistributions = useMemo(() => {
-        if (!selectedStaffId) {
-            return distributions;
+    const getStatusClass = (status: string) => {
+        switch (status) {
+            case 'completed':
+                return 'badge-green';
+
+            case 'pending':
+                return 'badge-slate';
+
+            case 'in_transit':
+                return 'badge-amber';
+
+            case 'cancelled':
+                return 'badge-red';
+
+            default:
+                return 'badge-slate';
         }
-
-        const selectedStaff = staff.find(
-            (member) => String(member.id) === selectedStaffId,
-        );
-
-        if (!selectedStaff?.purok_id) {
-            return [];
-        }
-
-        return distributions.filter(
-            (distribution) =>
-                distribution.family?.purok_id === selectedStaff.purok_id,
-        );
-    }, [distributions, staff, selectedStaffId]);
-
-    /*
-    |--------------------------------------------------------------------------
-    | Resources
-    |--------------------------------------------------------------------------
-    */
-
-    const resourcesByCategory = (category: string) =>
-        resources.filter((r) => r.category === category);
-
-    const availableCategories = CATEGORY_ORDER.filter(
-        (category) => resourcesByCategory(category).length > 0,
-    );
-
-    /*
-    |--------------------------------------------------------------------------
-    | Open Create / Record Distribution
-    |--------------------------------------------------------------------------
-    */
-
-    const openCreate = (family?: Family) => {
-        setEditing(null);
-
-        const resource = defaultResource;
-
-        form.setData({
-            ...emptyForm,
-
-            family_id: family ? String(family.id) : '',
-
-            resource_id: resource ? String(resource.id) : '',
-
-            resource_category: resource?.category ?? '',
-
-            quantity: 1,
-
-            beneficiary_count: family?.beneficiary_count ?? '',
-
-            recipient_name: family?.family_name ?? '',
-
-            recipient_contact: family?.phone ?? '',
-
-            distribution_date: new Date().toISOString().slice(0, 16),
-
-            status: 'pending',
-        });
-
-        if (family?.purok_id) {
-            const familyStaff = staff.find(
-                (member) => member.purok_id === family.purok_id,
-            );
-
-            if (familyStaff) {
-                setSelectedStaffId(String(familyStaff.id));
-            }
-        }
-
-        setShowForm(true);
     };
 
-    /*
-    |--------------------------------------------------------------------------
-    | Open Edit
-    |--------------------------------------------------------------------------
-    */
+    // ============================================================
+    // DATE
+    // ============================================================
 
-    const openEdit = (d: Distribution) => {
-        setEditing(d);
-
-        const primaryResource = resources.find(
-            (r) => r.id === d.resource_id,
-        );
-
-        const additionalResource = d.additional_resource_id
-            ? resources.find((r) => r.id === d.additional_resource_id)
-            : undefined;
-
-        /*
-         * Find the staff assigned to this family's Purok.
-         *
-         * This allows the Family dropdown to show the correct
-         * families when editing.
-         */
-
-        if (d.family?.purok_id) {
-            const familyStaff = staff.find(
-                (member) => member.purok_id === d.family?.purok_id,
-            );
-
-            if (familyStaff) {
-                setSelectedStaffId(String(familyStaff.id));
-            }
+    const formatDate = (date: string) => {
+        if (!date) {
+            return currentDate;
         }
 
-        form.setData({
-            resource_id: String(d.resource_id),
-
-            resource_category: primaryResource?.category ?? '',
-
-            additional_resource_id: d.additional_resource_id
-                ? String(d.additional_resource_id)
-                : '',
-
-            additional_resource_category:
-                additionalResource?.category ?? '',
-
-            has_additional: !!d.additional_resource_id,
-
-            location_id: d.location_id ? String(d.location_id) : '',
-
-            family_id: d.family_id ? String(d.family_id) : '',
-
-            quantity: d.quantity,
-
-            additional_quantity: d.additional_quantity ?? 1,
-
-            recipient_name: d.recipient_name ?? '',
-
-            recipient_contact: d.recipient_contact ?? '',
-
-            beneficiary_count: d.beneficiary_count ?? '',
-
-            distribution_date: d.distribution_date.slice(0, 16),
-
-            status: d.status,
-
-            notes: d.notes ?? '',
+        return new Date(date).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
         });
-
-        setShowForm(true);
     };
 
-    /*
-    |--------------------------------------------------------------------------
-    | Submit Actual Distribution Record
-    |--------------------------------------------------------------------------
-    |
-    | IMPORTANT:
-    | Families appearing in the table DOES NOT call this function.
-    |
-    | This function only runs when the user actually chooses
-    | "Record Distribution".
-    |
-    */
+    // ============================================================
+    // STATISTICS
+    // ============================================================
 
-    const submit: FormEventHandler = (e) => {
-        e.preventDefault();
+    const totalFamilies = filteredRows.length;
+
+    const completedFamilies = filteredRows.filter(
+        (row) => row.status === 'completed',
+    ).length;
+
+    const pendingFamilies = filteredRows.filter(
+        (row) => row.status === 'pending',
+    ).length;
+
+    // ============================================================
+    // EDIT EXISTING DISTRIBUTION
+    // ============================================================
+
+    const openEditDistribution = (
+        distribution: Distribution,
+        family: Family,
+    ) => {
+        setEditingFamily(family);
+        setEditingDistribution(distribution);
+
+        form.setData({
+            family_id: distribution.family_id,
+
+            resource_id: distribution.resource_id,
+
+            quantity: distribution.quantity ?? 1,
+
+            additional_resource_id: distribution.additional_resource_id ?? '',
+
+            additional_quantity: distribution.additional_quantity ?? 0,
+
+            location_id: distribution.location_id ?? '',
+
+            distribution_date: distribution.distribution_date
+                ? distribution.distribution_date.substring(0, 10)
+                : currentDate,
+
+            status: distribution.status ?? 'pending',
+
+            notes: distribution.notes ?? '',
+        });
+    };
+
+    // ============================================================
+    // SUBMIT
+    // ============================================================
+
+    const submit = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+
+        if (!editingDistribution) {
+            console.error('No distribution selected for editing.');
+            return;
+        }
 
         const payload = {
-            family_id: form.data.family_id,
+            family_id: Number(form.data.family_id),
 
-            resource_id: form.data.resource_id,
+            resource_id: Number(form.data.resource_id),
 
-            location_id: form.data.location_id,
+            quantity: Number(form.data.quantity),
 
-            quantity: form.data.quantity || 1,
+            additional_resource_id:
+                form.data.additional_resource_id !== '' &&
+                form.data.additional_resource_id !== null
+                    ? Number(form.data.additional_resource_id)
+                    : null,
 
-            additional_resource_id: form.data.has_additional
-                ? form.data.additional_resource_id
-                : '',
+            additional_quantity:
+                form.data.additional_resource_id !== '' &&
+                form.data.additional_resource_id !== null
+                    ? Number(form.data.additional_quantity || 1)
+                    : null,
 
-            additional_quantity: form.data.has_additional
-                ? form.data.additional_quantity
-                : '',
-
-            recipient_name: form.data.recipient_name,
-
-            recipient_contact: form.data.recipient_contact,
-
-            beneficiary_count: form.data.beneficiary_count,
+            location_id:
+                form.data.location_id !== '' && form.data.location_id !== null
+                    ? Number(form.data.location_id)
+                    : null,
 
             distribution_date: form.data.distribution_date,
 
             status: form.data.status,
 
-            notes: form.data.notes,
+            notes: form.data.notes || null,
         };
+
+        console.log('UPDATING DISTRIBUTION:', editingDistribution.id);
+
+        console.log('PAYLOAD:', payload);
 
         form.transform(() => payload);
 
-        if (editing) {
-            form.put(`/distribution/${editing.id}`, {
-                onSuccess: () => {
-                    setShowForm(false);
-                    setEditing(null);
-                },
-            });
-        } else {
-            form.post('/distribution', {
-                onSuccess: () => {
-                    setShowForm(false);
-                },
-            });
-        }
-    };
+        form.put(`/distribution/${editingDistribution.id}`, {
+            preserveScroll: true,
 
-    /*
-    |--------------------------------------------------------------------------
-    | Delete
-    |--------------------------------------------------------------------------
-    */
+            onStart: () => {
+                console.log('UPDATE REQUEST STARTED');
+            },
 
-    const confirmDelete = () => {
-        if (!deleting) return;
+            onSuccess: () => {
+                console.log('DISTRIBUTION UPDATED SUCCESSFULLY');
 
-        router.delete(`/distribution/${deleting.id}`, {
-            onFinish: () => setDeleting(null),
+                setEditingFamily(null);
+                setEditingDistribution(null);
+
+                form.reset();
+                form.clearErrors();
+            },
+
+            onError: (errors) => {
+                console.error('UPDATE ERROR:', errors);
+            },
+
+            onFinish: () => {
+                console.log('UPDATE REQUEST FINISHED');
+            },
         });
     };
 
-    /*
-    |--------------------------------------------------------------------------
-    | Search
-    |--------------------------------------------------------------------------
-    |
-    | Search is now handled locally for the family distribution list.
-    | This means newly registered families can be searched immediately.
-    |
-    */
+    // ============================================================
+    // DELETE DISTRIBUTION
+    // ============================================================
 
-    const runSearch = (value: string) => {
-        setSearch(value);
+    const confirmDelete = () => {
+        if (!deleting) {
+            return;
+        }
+
+        router.delete(`/distribution/${deleting.id}`, {
+            preserveScroll: true,
+
+            onSuccess: () => {
+                setDeleting(null);
+            },
+        });
     };
 
-    /*
-    |--------------------------------------------------------------------------
-    | QR Download
-    |--------------------------------------------------------------------------
-    */
+    // ============================================================
+    // CLOSE QR
+    // ============================================================
+
+    const closeQr = () => {
+        setQrDistribution(null);
+    };
+
+    // ============================================================
+    // DOWNLOAD QR
+    // ============================================================
 
     const downloadQr = () => {
-        const canvas = qrRef.current?.querySelector('canvas');
+        if (!qrRef.current) {
+            return;
+        }
 
-        if (!canvas || !qrDistribution) return;
+        const canvas = qrRef.current.querySelector('canvas');
+
+        if (!canvas) {
+            return;
+        }
 
         const link = document.createElement('a');
 
-        link.download = `${qrDistribution.qr_code ?? 'distribution'}-qr.png`;
+        link.download = `distribution-${qrDistribution?.qr_code ?? 'qr'}.png`;
 
         link.href = canvas.toDataURL('image/png');
 
         link.click();
     };
 
-    /*
-    |--------------------------------------------------------------------------
-    | Render
-    |--------------------------------------------------------------------------
-    */
+    // ============================================================
+    // RENDER
+    // ============================================================
 
     return (
         <AppLayout
             title="Distribution"
-            subtitle="Track supplies delivered to recipients"
+            subtitle="Manage the current relief distribution"
         >
             <Head title="Distribution" />
 
-            {/* Header */}
+            {/* SUMMARY */}
+
+            <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="card flex items-center gap-4">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                        <Users size={21} />
+                    </div>
+
+                    <div>
+                        <p className="text-xs text-slate-400">Families</p>
+
+                        <p className="text-xl font-semibold text-slate-800">
+                            {totalFamilies}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="card flex items-center gap-4">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+                        <Clock3 size={21} />
+                    </div>
+
+                    <div>
+                        <p className="text-xs text-slate-400">Pending</p>
+
+                        <p className="text-xl font-semibold text-slate-800">
+                            {pendingFamilies}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="card flex items-center gap-4">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-green-50 text-green-600">
+                        <CheckCircle2 size={21} />
+                    </div>
+
+                    <div>
+                        <p className="text-xs text-slate-400">Completed</p>
+
+                        <p className="text-xl font-semibold text-slate-800">
+                            {completedFamilies}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* FILTERS */}
+
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="relative w-full sm:max-w-xs">
+                <div className="relative w-full sm:max-w-sm">
                     <Search
-                        className="absolute top-1/2 left-3 -translate-y-1/2 text-slate-400"
-                        size={16}
+                        size={17}
+                        className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400"
                     />
 
                     <input
+                        type="text"
                         className="input-field pl-9"
-                        placeholder="Search family..."
+                        placeholder="Search family, head, Family ID..."
                         value={search}
-                        onChange={(e) => runSearch(e.target.value)}
+                        onChange={(e) => setSearch(e.target.value)}
                     />
                 </div>
 
-                <div className="flex items-center justify-end gap-3">
-                    {/* Staff filter */}
-                    <div className="relative">
-                        <UserCog
-                            size={18}
-                            className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-500"
-                        />
+                <select
+                    className="input-field sm:w-56"
+                    value={selectedStaffId}
+                    onChange={(e) => setSelectedStaffId(e.target.value)}
+                >
+                    <option value="">All Staff / Puroks</option>
 
-                        <select
-                            className="input-field appearance-none pr-10 pl-10"
-                            value={selectedStaffId}
-                            onChange={(e) =>
-                                setSelectedStaffId(e.target.value)
-                            }
-                        >
-                            <option value="">All Staff</option>
-
-                            {staff.map((member) => (
-                                <option key={member.id} value={member.id}>
-                                    {member.name}
-                                </option>
-                            ))}
-                        </select>
-
-                        <ChevronDown
-                            size={18}
-                            className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-slate-500"
-                        />
-                    </div>
-                </div>
+                    {staff.map((member) => (
+                        <option key={member.id} value={member.id}>
+                            {member.name}
+                            {member.purok_id
+                                ? ` — Purok ${member.purok_id}`
+                                : ''}
+                        </option>
+                    ))}
+                </select>
             </div>
 
-            {/* ========================================================= */}
-            {/* REGISTERED FAMILIES / DISTRIBUTION QUEUE                 */}
-            {/* ========================================================= */}
+            {/* DISTRIBUTION TABLE */}
 
-            <div className="mb-6">
-                <div className="mb-3 flex items-center justify-between">
-                    <div>
-                        <h2 className="text-base font-semibold text-slate-800">
-                            Families for Distribution
-                        </h2>
+            <div className="card overflow-x-auto p-0">
+                <div className="border-b border-slate-100 px-4 py-4">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h2 className="font-semibold text-slate-800">
+                                Current Relief Distribution
+                            </h2>
 
-                        <p className="text-xs text-slate-400">
-                            Registered families automatically appear here.
-                            No distribution record is created until a
-                            distribution is actually recorded.
-                        </p>
+                            <p className="text-xs text-slate-400">
+                                {formatDate(currentDate)}
+                            </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span className="inline-flex items-center gap-1">
+                                <span className="h-2 w-2 rounded-full bg-slate-400" />
+                                Pending
+                            </span>
+
+                            <span className="inline-flex items-center gap-1">
+                                <span className="h-2 w-2 rounded-full bg-green-500" />
+                                Completed
+                            </span>
+                        </div>
                     </div>
-
-                    <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600">
-                        {filteredFamilies.length}{' '}
-                        {filteredFamilies.length === 1
-                            ? 'Family'
-                            : 'Families'}
-                    </span>
                 </div>
 
-                <div className="card overflow-x-auto p-0">
-                    <table className="w-full text-sm">
-                        <thead>
-                            <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs text-slate-500 uppercase">
-                                <th className="px-4 py-3">Family</th>
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs text-slate-500 uppercase">
+                            <th className="px-4 py-3">Family</th>
 
-                                <th className="px-4 py-3">Head of Family</th>
+                            <th className="px-4 py-3">Family Head</th>
 
-                                <th className="px-4 py-3">Purok</th>
+                            <th className="px-4 py-3">Purok</th>
 
-                                <th className="px-4 py-3">
-                                    Beneficiaries
-                                </th>
+                            <th className="px-4 py-3">Relief</th>
 
-                                <th className="px-4 py-3 text-right">
-                                    Action
-                                </th>
-                            </tr>
-                        </thead>
+                            <th className="px-4 py-3">Qty</th>
 
-                        <tbody>
-                            {filteredFamilies.length === 0 && (
-                                <tr>
-                                    <td
-                                        colSpan={8}
-                                        className="px-4 py-10 text-center text-slate-400"
-                                    >
-                                        No registered families found.
-                                    </td>
-                                </tr>
-                            )}
+                            <th className="px-4 py-3">Date</th>
 
-                            {filteredFamilies.map((family) => (
-                                <tr
-                                    key={family.id}
-                                    className="border-b border-slate-50 hover:bg-slate-50"
+                            <th className="px-4 py-3">Status</th>
+
+                            <th className="px-4 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {filteredRows.length === 0 && (
+                            <tr>
+                                <td
+                                    colSpan={8}
+                                    className="px-4 py-12 text-center text-slate-400"
                                 >
-                                    {/* Family */}
-                                    <td className="px-4 py-3">
-                                        <div className="flex items-center gap-2.5">
-                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                                                <Truck size={16} />
-                                            </div>
-
-                                            <div>
-                                                <p className="font-medium text-slate-800">
-                                                    {family.family_name}
-                                                </p>
-
-                                                <p className="text-xs text-slate-400">
-                                                    {family.family_id}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </td>
-
-                                    {/* Head */}
-                                    <td className="px-4 py-3 text-slate-600">
-                                        {family.head_name}
-                                    </td>
-
-                                    {/* Purok */}
-                                    <td className="px-4 py-3 text-slate-600">
-                                        {family.purok?.name ??
-                                            `Purok ${family.purok_id}`}
-                                    </td>
-
-                                    {/* Beneficiaries */}
-                                    <td className="px-4 py-3 text-slate-600">
-                                        <span className="font-medium">
-                                            {family.beneficiary_count}
-                                        </span>
-                                    </td>
-
-                                    {/* Action */}
-                                    <td className="px-4 py-3">
-                                        <div className="flex justify-end">
-                                            <button
-                                                type="button"
-                                                className="btn-primary flex items-center gap-2"
-                                                onClick={() =>
-                                                    openCreate(family)
-                                                }
-                                            >
-                                                <Plus size={14} />
-                                                Record
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            {/* ========================================================= */}
-            {/* ACTUAL DISTRIBUTION RECORDS / HISTORY                    */}
-            {/* ========================================================= */}
-
-            <div>
-                <div className="mb-3">
-                    <h2 className="text-base font-semibold text-slate-800">
-                        Distribution Records
-                    </h2>
-
-                    <p className="text-xs text-slate-400">
-                        Actual distributions that have been recorded.
-                    </p>
-                </div>
-
-                <div className="card overflow-x-auto p-0">
-                    <table className="w-full text-sm">
-                        <thead>
-                            <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs text-slate-500 uppercase">
-                                <th className="px-4 py-3">Recipient</th>
-
-                                <th className="px-4 py-3">Resource</th>
-
-                                <th className="px-4 py-3">Quantity</th>
-
-                                <th className="px-4 py-3">Beneficiaries</th>
-
-                                <th className="px-4 py-3">Date</th>
-
-                                <th className="px-4 py-3">Status</th>
-
-                                <th className="px-4 py-3 text-right">
-                                    Actions
-                                </th>
+                                    No families found.
+                                </td>
                             </tr>
-                        </thead>
+                        )}
 
-                        <tbody>
-                            {filteredDistributions.length === 0 && (
-                                <tr>
-                                    <td
-                                        colSpan={7}
-                                        className="px-4 py-10 text-center text-slate-400"
-                                    >
-                                        No distribution records found.
-                                    </td>
-                                </tr>
-                            )}
+                        {filteredRows.map((row) => (
+                            <tr
+                                key={row.distribution.id}
+                                className="border-b border-slate-50 hover:bg-slate-50"
+                            >
+                                {/* FAMILY */}
 
-                            {filteredDistributions.map((d) => (
-                                <tr
-                                    key={d.id}
-                                    className="border-b border-slate-50 hover:bg-slate-50"
-                                >
-                                    {/* Recipient */}
-                                    <td className="px-4 py-3">
-                                        <div className="flex items-center gap-2.5">
-                                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                                                <Truck size={16} />
-                                            </div>
-
-                                            <div>
-                                                <p className="font-medium text-slate-800">
-                                                    {d.family?.family_name ??
-                                                        d.recipient_name}
-                                                </p>
-
-                                                {d.family && (
-                                                    <p className="text-xs text-slate-400">
-                                                        {d.family.family_id}
-                                                    </p>
-                                                )}
-
-                                                {d.location && (
-                                                    <p className="text-xs text-slate-400">
-                                                        {d.location.name}
-                                                    </p>
-                                                )}
-                                            </div>
+                                <td className="px-4 py-3">
+                                    <div className="flex items-center gap-2.5">
+                                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                                            <Truck size={17} />
                                         </div>
-                                    </td>
 
-                                    {/* Resource */}
-                                    <td className="px-4 py-3 text-slate-600">
-                                        <p>{d.resource?.name}</p>
-
-                                        {d.additional_resource && (
-                                            <p className="text-xs text-purple-600">
-                                                +{' '}
-                                                {
-                                                    d.additional_resource
-                                                        .name
-                                                }
+                                        <div>
+                                            <p className="font-medium text-slate-800">
+                                                {row.family.family_name}
                                             </p>
-                                        )}
-                                    </td>
 
-                                    {/* Quantity */}
-                                    <td className="px-4 py-3 text-slate-600">
-                                        <p>
-                                            {d.quantity}{' '}
-                                            {d.resource?.unit}
+                                            <p className="text-xs text-slate-400">
+                                                {row.family.family_id}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </td>
+
+                                {/* FAMILY HEAD */}
+
+                                <td className="px-4 py-3">
+                                    <p className="font-medium text-slate-700">
+                                        {row.family.head_name}
+                                    </p>
+
+                                    <p className="text-xs text-slate-400">
+                                        {row.family.household_member}{' '}
+                                        {row.family.household_member === 1
+                                            ? 'household_member'
+                                            : 'household member'}
+                                    </p>
+                                </td>
+
+                                {/* PUROK */}
+
+                                <td className="px-4 py-3 text-slate-600">
+                                    {row.family.purok?.name ??
+                                        `Purok ${row.family.purok_id}`}
+                                </td>
+
+                                {/* RELIEF */}
+
+                                <td className="px-4 py-3 text-slate-600">
+                                    <p>{row.reliefName}</p>
+
+                                    {row.distribution.additional_resource
+                                        ?.name && (
+                                        <p className="text-xs text-purple-600">
+                                            +{' '}
+                                            {
+                                                row.distribution
+                                                    .additional_resource.name
+                                            }
                                         </p>
+                                    )}
+                                </td>
 
-                                        {d.additional_resource && (
-                                            <p className="text-xs text-purple-600">
-                                                +{' '}
-                                                {d.additional_quantity}{' '}
-                                                {
-                                                    d.additional_resource
-                                                        .unit
-                                                }
-                                            </p>
-                                        )}
-                                    </td>
+                                {/* Quantity */}
+                                <td className="px-4 py-3 text-slate-600">
+                                    <p>{row.quantity}</p>
 
-                                    {/* Beneficiaries */}
-                                    <td className="px-4 py-3 text-slate-600">
-                                        {d.beneficiary_count}
-                                    </td>
+                                    {row.distribution
+                                        .additional_resource_id && (
+                                        <p className="text-xs text-purple-600">
+                                            +{' '}
+                                            {row.distribution
+                                                .additional_quantity ?? 0}
+                                        </p>
+                                    )}
+                                </td>
 
-                                    {/* Date */}
-                                    <td className="px-4 py-3 text-slate-500">
-                                        {new Date(
-                                            d.distribution_date,
-                                        ).toLocaleDateString()}
-                                    </td>
+                                {/* DATE */}
 
-                                    {/* Status */}
-                                    <td className="px-4 py-3">
-                                        <span
-                                            className={`badge ${
-                                                statusBadge[d.status] ??
-                                                'badge-slate'
-                                            } capitalize`}
+                                <td className="px-4 py-3 text-slate-500">
+                                    {formatDate(row.date)}
+                                </td>
+
+                                {/* STATUS */}
+
+                                <td className="px-4 py-3">
+                                    <span
+                                        className={`badge ${getStatusClass(
+                                            row.status,
+                                        )} capitalize`}
+                                    >
+                                        {row.status.replace('_', ' ')}
+                                    </span>
+                                </td>
+
+                                {/* ACTIONS */}
+
+                                <td className="px-4 py-3">
+                                    <div className="flex justify-end gap-1.5">
+                                        {/* QR */}
+
+                                        <button
+                                            type="button"
+                                            className="rounded-lg p-1.5 text-purple-500 hover:bg-purple-50"
+                                            onClick={() =>
+                                                setQrDistribution(
+                                                    row.distribution,
+                                                )
+                                            }
+                                            title="View / Scan QR Code"
                                         >
-                                            {d.status.replace('_', ' ')}
-                                        </span>
-                                    </td>
+                                            <QrCode size={15} />
+                                        </button>
 
-                                    {/* Actions */}
-                                    <td className="px-4 py-3">
-                                        <div className="flex justify-end gap-1.5">
-                                            <button
-                                                type="button"
-                                                className="rounded-lg p-1.5 text-purple-500 hover:bg-purple-50"
-                                                onClick={() =>
-                                                    setQrDistribution(d)
-                                                }
-                                                title="View QR code"
-                                            >
-                                                <QrCode size={15} />
-                                            </button>
+                                        {/* EDIT */}
 
-                                            <button
-                                                type="button"
-                                                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
-                                                onClick={() =>
-                                                    openEdit(d)
-                                                }
-                                                title="Edit"
-                                            >
-                                                <Pencil size={15} />
-                                            </button>
+                                        <button
+                                            type="button"
+                                            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+                                            onClick={() =>
+                                                openEditDistribution(
+                                                    row.distribution,
+                                                    row.family,
+                                                )
+                                            }
+                                            title="Edit Distribution"
+                                        >
+                                            <Pencil size={15} />
+                                        </button>
 
-                                            <button
-                                                type="button"
-                                                className="rounded-lg p-1.5 text-red-500 hover:bg-red-50"
-                                                onClick={() =>
-                                                    setDeleting(d)
-                                                }
-                                                title="Delete"
-                                            >
-                                                <Trash2 size={15} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                                        {/* DELETE */}
+
+                                        <button
+                                            type="button"
+                                            className="rounded-lg p-1.5 text-red-500 hover:bg-red-50"
+                                            onClick={() =>
+                                                setDeleting(row.distribution)
+                                            }
+                                            title="Delete Distribution"
+                                        >
+                                            <Trash2 size={15} />
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
 
-            {/* ========================================================= */}
-            {/* DISTRIBUTION FORM MODAL                                  */}
-            {/* ========================================================= */}
+            {/* EDIT DISTRIBUTION MODAL */}
 
             <Modal
-                open={showForm}
-                onClose={() => setShowForm(false)}
+                open={!!editingFamily}
+                onClose={() => {
+                    setEditingFamily(null);
+                    setEditingDistribution(null);
+                    form.reset();
+                    form.clearErrors();
+                }}
                 title={
-                    editing
-                        ? 'Edit Distribution'
-                        : 'Record Distribution'
+                    editingDistribution
+                        ? 'Edit Family Distribution'
+                        : 'Set Family Distribution'
                 }
-                wide
             >
-                <form onSubmit={submit} className="space-y-4">
-                    {/* Staff / Purok */}
-                    <div>
-                        <label className="label">Staff / Purok</label>
+                <form onSubmit={submit} className="p-6">
+                    <p className="mt-1 text-sm text-slate-500">
+                        Edit the distribution details for{' '}
+                        {editingFamily?.family_name ?? 'family'}.
+                    </p>
 
-                        <select
-                            className="input-field"
-                            value={selectedStaffId}
-                            onChange={(e) => {
-                                setSelectedStaffId(e.target.value);
+                    <div className="mt-5 space-y-4">
+                        {/* FAMILY */}
 
-                                form.setData('family_id', '');
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">
+                                Family
+                            </label>
 
-                                form.setData('recipient_name', '');
+                            <input
+                                type="text"
+                                className="input-field"
+                                value={editingFamily?.family_name ?? ''}
+                                disabled
+                            />
+                        </div>
 
-                                form.setData(
-                                    'recipient_contact',
-                                    '',
-                                );
+                        {/* RELIEF */}
 
-                                form.setData(
-                                    'beneficiary_count',
-                                    '',
-                                );
-                            }}
-                        >
-                            <option value="">Select Staff</option>
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">
+                                Relief
+                            </label>
 
-                            {staff.map((member) => (
-                                <option
-                                    key={member.id}
-                                    value={member.id}
-                                >
-                                    {member.name}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
-                    {/* Family */}
-                    <div>
-                        <label className="label">Family</label>
-
-                        <select
-                            className="input-field"
-                            value={form.data.family_id}
-                            onChange={(e) => {
-                                const familyId = e.target.value;
-
-                                const family =
-                                    availableFamilies.find(
-                                        (item) =>
-                                            String(item.id) ===
-                                            familyId,
-                                    );
-
-                                form.setData(
-                                    'family_id',
-                                    familyId,
-                                );
-
-                                if (family) {
-                                    form.setData(
-                                        'recipient_name',
-                                        family.family_name,
-                                    );
-
-                                    form.setData(
-                                        'recipient_contact',
-                                        family.phone ?? '',
-                                    );
-
-                                    form.setData(
-                                        'beneficiary_count',
-                                        family.beneficiary_count,
-                                    );
+                            <select
+                                className="input-field"
+                                value={form.data.resource_id}
+                                onChange={(e) =>
+                                    form.setData('resource_id', e.target.value)
                                 }
-                            }}
-                        >
-                            <option value="">
-                                Select Family
-                            </option>
+                            >
+                                <option value="">Select relief</option>
 
-                            {availableFamilies.map((family) => (
-                                <option
-                                    key={family.id}
-                                    value={family.id}
-                                >
-                                    {family.family_name} —{' '}
-                                    {family.family_id}
-                                </option>
-                            ))}
-                        </select>
+                                {resources.map((resource) => (
+                                    <option
+                                        key={resource.id}
+                                        value={resource.id}
+                                    >
+                                        {resource.name}
+                                    </option>
+                                ))}
+                            </select>
 
-                        {form.errors.family_id && (
-                            <p className="mt-1 text-xs text-red-600">
-                                {form.errors.family_id}
-                            </p>
-                        )}
-                    </div>
+                            {form.errors.resource_id && (
+                                <p className="mt-1 text-xs text-red-500">
+                                    {form.errors.resource_id}
+                                </p>
+                            )}
+                        </div>
 
-                    {/* Resource */}
-                    <div>
-                        <label className="label">Resource</label>
+                        {/* ADDITIONAL RESOURCE */}
 
-                        <select
-                            className="input-field"
-                            value={form.data.resource_id}
-                            onChange={(e) => {
-                                const resourceId = e.target.value;
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">
+                                Additional Resource
+                            </label>
 
-                                const resource = resources.find(
-                                    (r) =>
-                                        String(r.id) ===
-                                        resourceId,
-                                );
+                            <select
+                                className="input-field"
+                                value={form.data.additional_resource_id}
+                                onChange={(e) =>
+                                    form.setData(
+                                        'additional_resource_id',
+                                        e.target.value,
+                                    )
+                                }
+                            >
+                                <option value="">None</option>
 
-                                form.setData(
-                                    'resource_id',
-                                    resourceId,
-                                );
-
-                                form.setData(
-                                    'resource_category',
-                                    resource?.category ?? '',
-                                );
-                            }}
-                        >
-                            <option value="">
-                                Select Resource
-                            </option>
-
-                            {availableCategories.map(
-                                (category) => (
-                                    <optgroup
-                                        key={category}
-                                        label={
-                                            CATEGORY_LABELS[
-                                                category
-                                            ] ?? category
+                                {resources.map((resource) => (
+                                    <option
+                                        key={resource.id}
+                                        value={resource.id}
+                                        disabled={
+                                            String(resource.id) ===
+                                            String(form.data.resource_id)
                                         }
                                     >
-                                        {resourcesByCategory(
-                                            category,
-                                        ).map((resource) => (
-                                            <option
-                                                key={resource.id}
-                                                value={resource.id}
-                                            >
-                                                {resource.name}
-                                                {resource.unit
-                                                    ? ` (${resource.unit})`
-                                                    : ''}
-                                            </option>
-                                        ))}
-                                    </optgroup>
-                                ),
+                                        {resource.name}
+                                    </option>
+                                ))}
+                            </select>
+
+                            {form.errors.additional_resource_id && (
+                                <p className="mt-1 text-xs text-red-500">
+                                    {form.errors.additional_resource_id}
+                                </p>
                             )}
-                        </select>
+                        </div>
 
-                        {form.errors.resource_id && (
-                            <p className="mt-1 text-xs text-red-600">
-                                {form.errors.resource_id}
-                            </p>
-                        )}
-                    </div>
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">
+                                Additional Quantity
+                            </label>
 
-                    {/* Quantity */}
-                    <div>
-                        <label className="label">
-                            Quantity
-                        </label>
-
-                        <input
-                            type="number"
-                            min={1}
-                            className="input-field"
-                            value={form.data.quantity}
-                            onChange={(e) =>
-                                form.setData(
-                                    'quantity',
-                                    e.target.value,
-                                )
-                            }
-                        />
-
-                        <p className="mt-1 text-xs text-slate-400">
-                            Default: 1 box of Set of Goods.
-                        </p>
-
-                        {form.errors.quantity && (
-                            <p className="mt-1 text-xs text-red-600">
-                                {form.errors.quantity}
-                            </p>
-                        )}
-                    </div>
-
-                    {/* Beneficiaries */}
-                    <div>
-                        <label className="label">
-                            Beneficiaries
-                        </label>
-
-                        <input
-                            type="number"
-                            className="input-field bg-slate-50"
-                            value={form.data.beneficiary_count}
-                            readOnly
-                        />
-
-                        <p className="mt-1 text-xs text-slate-400">
-                            Automatically taken from the
-                            selected family's beneficiary
-                            count.
-                        </p>
-
-                        {form.errors.beneficiary_count && (
-                            <p className="mt-1 text-xs text-red-600">
-                                {form.errors.beneficiary_count}
-                            </p>
-                        )}
-                    </div>
-
-                    {/* Additional Resource */}
-                    <div className="sm:col-span-2">
-                        <label className="flex cursor-pointer items-center gap-2">
                             <input
-                                type="checkbox"
-                                checked={
-                                    form.data.has_additional
-                                }
-                                onChange={(e) => {
-                                    const checked =
-                                        e.target.checked;
-
+                                type="number"
+                                min="1"
+                                className="input-field"
+                                value={form.data.additional_quantity}
+                                disabled={!form.data.additional_resource_id}
+                                onChange={(e) =>
                                     form.setData(
-                                        'has_additional',
-                                        checked,
-                                    );
-
-                                    if (!checked) {
-                                        form.setData(
-                                            'additional_resource_id',
-                                            '',
-                                        );
-
-                                        form.setData(
-                                            'additional_resource_category',
-                                            '',
-                                        );
-
-                                        form.setData(
-                                            'additional_quantity',
-                                            1,
-                                        );
-                                    }
-                                }}
+                                        'additional_quantity',
+                                        e.target.value,
+                                    )
+                                }
                             />
 
-                            <span className="text-sm font-medium text-slate-700">
-                                Request additional emergency
-                                resource
-                            </span>
-                        </label>
-                    </div>
+                            {form.errors.additional_quantity && (
+                                <p className="mt-1 text-xs text-red-500">
+                                    {form.errors.additional_quantity}
+                                </p>
+                            )}
+                        </div>
 
-                    {form.data.has_additional && (
-                        <>
-                            <div>
-                                <label className="label">
-                                    Emergency Resource
-                                </label>
+                        {/* QUANTITY */}
 
-                                <select
-                                    className="input-field"
-                                    value={
-                                        form.data
-                                            .additional_resource_id
-                                    }
-                                    onChange={(e) => {
-                                        const resourceId =
-                                            e.target.value;
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">
+                                Quantity
+                            </label>
 
-                                        const resource =
-                                            resources.find(
-                                                (r) =>
-                                                    String(
-                                                        r.id,
-                                                    ) ===
-                                                    resourceId,
-                                            );
+                            <input
+                                type="number"
+                                min="1"
+                                className="input-field"
+                                value={form.data.quantity}
+                                onChange={(e) =>
+                                    form.setData(
+                                        'quantity',
+                                        Number(e.target.value),
+                                    )
+                                }
+                            />
 
-                                        form.setData(
-                                            'additional_resource_id',
-                                            resourceId,
-                                        );
+                            {form.errors.quantity && (
+                                <p className="mt-1 text-xs text-red-500">
+                                    {form.errors.quantity}
+                                </p>
+                            )}
+                        </div>
 
-                                        form.setData(
-                                            'additional_resource_category',
-                                            resource?.category ??
-                                                '',
-                                        );
-                                    }}
-                                >
-                                    <option value="">
-                                        Select Emergency Resource
+                        {/* LOCATION */}
+
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">
+                                Relief Location
+                            </label>
+
+                            <select
+                                className="input-field"
+                                value={form.data.location_id}
+                                onChange={(e) =>
+                                    form.setData('location_id', e.target.value)
+                                }
+                            >
+                                <option value="">Select location</option>
+
+                                {locations.map((location) => (
+                                    <option
+                                        key={location.id}
+                                        value={location.id}
+                                    >
+                                        {location.name}
                                     </option>
+                                ))}
+                            </select>
+                        </div>
 
-                                    {resources.map(
-                                        (resource) => (
-                                            <option
-                                                key={
-                                                    resource.id
-                                                }
-                                                value={
-                                                    resource.id
-                                                }
-                                            >
-                                                {resource.name}
-                                                {resource.unit
-                                                    ? ` (${resource.unit})`
-                                                    : ''}
-                                            </option>
-                                        ),
-                                    )}
-                                </select>
-                            </div>
+                        {/* DATE */}
 
-                            <div>
-                                <label className="label">
-                                    Emergency Quantity
-                                </label>
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">
+                                Distribution Date
+                            </label>
 
-                                <input
-                                    type="number"
-                                    min={1}
-                                    className="input-field"
-                                    value={
-                                        form.data
-                                            .additional_quantity
-                                    }
-                                    onChange={(e) =>
-                                        form.setData(
-                                            'additional_quantity',
-                                            e.target.value,
-                                        )
-                                    }
-                                />
-                            </div>
-                        </>
-                    )}
+                            <input
+                                type="date"
+                                className="input-field"
+                                value={form.data.distribution_date}
+                                onChange={(e) =>
+                                    form.setData(
+                                        'distribution_date',
+                                        e.target.value,
+                                    )
+                                }
+                            />
+                        </div>
 
-                    {/* Location */}
-                    <div>
-                        <label className="label">
-                            Location
-                        </label>
+                        {/* STATUS */}
 
-                        <select
-                            className="input-field"
-                            value={form.data.location_id}
-                            onChange={(e) =>
-                                form.setData(
-                                    'location_id',
-                                    e.target.value,
-                                )
-                            }
-                        >
-                            <option value="">
-                                Select Location
-                            </option>
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">
+                                Status
+                            </label>
 
-                            {locations.map((location) => (
-                                <option
-                                    key={location.id}
-                                    value={location.id}
-                                >
-                                    {location.name}
-                                </option>
-                            ))}
-                        </select>
+                            <select
+                                className="input-field"
+                                value={form.data.status}
+                                onChange={(e) =>
+                                    form.setData('status', e.target.value)
+                                }
+                            >
+                                <option value="pending">Pending</option>
+
+                                <option value="in_transit">In Transit</option>
+
+                                <option value="completed">Completed</option>
+
+                                <option value="cancelled">Cancelled</option>
+                            </select>
+                        </div>
+
+                        {/* NOTES */}
+
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-700">
+                                Notes
+                            </label>
+
+                            <textarea
+                                className="input-field min-h-20"
+                                value={form.data.notes}
+                                onChange={(e) =>
+                                    form.setData('notes', e.target.value)
+                                }
+                                placeholder="Optional notes..."
+                            />
+                        </div>
                     </div>
 
-                    {/* Distribution Date */}
-                    <div>
-                        <label className="label">
-                            Distribution Date
-                        </label>
+                    {/* BUTTONS */}
 
-                        <input
-                            type="datetime-local"
-                            className="input-field"
-                            value={
-                                form.data.distribution_date
-                            }
-                            onChange={(e) =>
-                                form.setData(
-                                    'distribution_date',
-                                    e.target.value,
-                                )
-                            }
-                        />
-                    </div>
-
-                    {/* Status */}
-                    <div>
-                        <label className="label">
-                            Status
-                        </label>
-
-                        <select
-                            className="input-field"
-                            value={form.data.status}
-                            onChange={(e) =>
-                                form.setData(
-                                    'status',
-                                    e.target.value,
-                                )
-                            }
-                        >
-                            <option value="pending">
-                                Pending
-                            </option>
-
-                            <option value="in_transit">
-                                In Transit
-                            </option>
-
-                            <option value="completed">
-                                Completed
-                            </option>
-
-                            <option value="cancelled">
-                                Cancelled
-                            </option>
-                        </select>
-                    </div>
-
-                    {/* Notes */}
-                    <div>
-                        <label className="label">
-                            Notes
-                        </label>
-
-                        <textarea
-                            className="input-field min-h-24"
-                            value={form.data.notes}
-                            onChange={(e) =>
-                                form.setData(
-                                    'notes',
-                                    e.target.value,
-                                )
-                            }
-                            placeholder="Optional notes..."
-                        />
-                    </div>
-
-                    {/* Hidden/Automatically generated recipient info */}
-                    <input
-                        type="hidden"
-                        value={form.data.recipient_name}
-                    />
-
-                    <input
-                        type="hidden"
-                        value={form.data.recipient_contact}
-                    />
-
-                    {/* Buttons */}
-                    <div className="flex justify-end gap-2 pt-2">
+                    <div className="mt-6 flex justify-end gap-2">
                         <button
                             type="button"
                             className="btn-secondary"
-                            onClick={() =>
-                                setShowForm(false)
-                            }
+                            onClick={() => {
+                                setEditingFamily(null);
+                                setEditingDistribution(null);
+                                form.reset();
+                                form.clearErrors();
+                            }}
                         >
                             Cancel
                         </button>
@@ -1388,81 +1021,78 @@ export default function DistributionPage({
                             disabled={form.processing}
                         >
                             {form.processing
-                                ? 'Saving…'
-                                : editing
+                                ? 'Saving...'
+                                : editingDistribution
                                   ? 'Save Changes'
-                                  : 'Record Distribution'}
+                                  : 'Save'}
                         </button>
                     </div>
                 </form>
             </Modal>
 
-            {/* ========================================================= */}
-            {/* QR MODAL                                                  */}
-            {/* ========================================================= */}
+            {/* QR MODAL */}
 
             <Modal
                 open={!!qrDistribution}
-                onClose={() => setQrDistribution(null)}
-                title="Distribution QR Code"
+                onClose={closeQr}
+                title="Family QR Code"
             >
-                {qrDistribution && (
-                    <div className="flex flex-col items-center gap-4">
-                        <div
-                            ref={qrRef}
-                            className="rounded-xl border border-slate-100 p-4"
-                        >
-                            <QRCodeCanvas
-                                value={
-                                    qrDistribution.qr_code ??
-                                    String(qrDistribution.id)
-                                }
-                                size={200}
-                                level="M"
-                            />
-                        </div>
+                <div className="p-6 text-center">
+                    <p className="mt-1 text-sm text-slate-500">
+                        Scan this QR code using the Staff Scanner app.
+                    </p>
 
-                        <div className="text-center">
-                            <p className="font-medium text-slate-800">
-                                {
-                                    qrDistribution.recipient_name
-                                }
-                            </p>
+                    <div
+                        ref={qrRef}
+                        className="mt-5 flex justify-center rounded-xl bg-white p-5"
+                    >
+                        <QRCodeCanvas
+                            value={qrDistribution?.qr_code ?? ''}
+                            size={220}
+                            level="M"
+                        />
+                    </div>
 
-                            <p className="text-xs text-slate-400">
-                                {qrDistribution.qr_code}
-                            </p>
-                        </div>
-
-                        <p className="text-center text-xs text-slate-500">
-                            Keep this QR code on file for this
-                            family. Scanning or looking it up
-                            before a future distribution helps
-                            confirm whether they have already
-                            received relief.
+                    <div className="mt-4">
+                        <p className="text-sm font-medium text-slate-700">
+                            {qrDistribution?.recipient_name}
                         </p>
 
+                        <p className="text-xs text-slate-400">
+                            {qrDistribution?.qr_code}
+                        </p>
+                    </div>
+
+                    <div className="mt-5 flex justify-center gap-2">
                         <button
                             type="button"
-                            className="btn-primary flex items-center gap-2"
+                            className="btn-secondary flex items-center gap-2"
                             onClick={downloadQr}
                         >
                             <Download size={16} />
-                            Download PNG
+                            Download QR
+                        </button>
+
+                        <button
+                            type="button"
+                            className="btn-primary"
+                            onClick={closeQr}
+                        >
+                            Close
                         </button>
                     </div>
-                )}
+                </div>
             </Modal>
 
-            {/* ========================================================= */}
-            {/* DELETE CONFIRMATION                                      */}
-            {/* ========================================================= */}
+            {/* DELETE DISTRIBUTION */}
 
             <ConfirmDialog
                 open={!!deleting}
                 onClose={() => setDeleting(null)}
                 onConfirm={confirmDelete}
-                message={`Delete distribution to "${deleting?.recipient_name}"? Completed distributions will restore stock.`}
+                message={`Delete distribution to "${
+                    deleting?.recipient_name ?? 'this family'
+                }"? Completed distributions will restore stock.`}
             />
         </AppLayout>
     );

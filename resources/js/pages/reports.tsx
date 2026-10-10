@@ -6,7 +6,7 @@ interface Summary {
     total_resources: number;
     total_locations: number;
     total_distributions: number;
-    total_beneficiaries: number;
+    total_household_member: number;
     low_stock_count: number;
     total_scans: number;
 }
@@ -20,7 +20,7 @@ interface CategoryRow {
 interface MonthRow {
     month: string;
     total_quantity: number;
-    beneficiaries: number;
+    household_member: number;
 }
 
 interface LocationRow {
@@ -66,7 +66,7 @@ export default function Reports({
         { label: 'Total Resource Units', value: summary.total_resources.toLocaleString(), icon: Package, color: 'bg-blue-50 text-blue-600' },
         { label: 'Locations', value: summary.total_locations, icon: MapPin, color: 'bg-purple-50 text-purple-600' },
         { label: 'Completed Distributions', value: summary.total_distributions, icon: Truck, color: 'bg-emerald-50 text-emerald-600' },
-        { label: 'Beneficiaries Served', value: summary.total_beneficiaries.toLocaleString(), icon: Users, color: 'bg-blue-50 text-blue-600' },
+        { label: 'Household Member Served', value: summary.total_household_member.toLocaleString(), icon: Users, color: 'bg-blue-50 text-blue-600' },
         { label: 'QR Scans', value: summary.total_scans, icon: QrCode, color: 'bg-purple-50 text-purple-600' },
         { label: 'Low Stock Items', value: summary.low_stock_count, icon: AlertTriangle, color: 'bg-amber-50 text-amber-600' },
     ];
@@ -134,7 +134,7 @@ export default function Reports({
                                 <li key={m.month} className="flex items-center justify-between py-2.5 text-sm">
                                     <span className="text-slate-600">{m.month}</span>
                                     <span className="text-slate-800">
-                                        {m.total_quantity} units · {m.beneficiaries} beneficiaries
+                                        {m.total_quantity} units · {m.household_member} household_member
                                     </span>
                                 </li>
                             ))}

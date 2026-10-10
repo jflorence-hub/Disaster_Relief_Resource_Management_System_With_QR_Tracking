@@ -19,19 +19,29 @@ interface Purok {
     code?: string;
 }
 
+interface Location {
+    id: number;
+    name: string;
+    status: string;
+    capacity?: number | null;
+}
+
 interface Family {
     id: number;
     family_id: string;
     family_name: string;
     head_name: string;
     phone?: string | null;
-    beneficiary_count: number;
+    household_member: number;
     address?: string | null;
     purok_id: number;
+    location_id?: number | null;
     pin?: string;
     status: string;
     purok?: Purok;
+    location?: Location;
 }
+
 interface Staff {
     id: number;
     name: string;
@@ -43,11 +53,11 @@ interface FormData {
     family_name: string;
     head_name: string;
     phone: string;
-    address: string;
+    location_id: string;
     purok_id: string;
     pin: string;
     status: string;
-    beneficiary_count: number | string;
+    household_member: number | string;
 }
 
 const emptyForm: FormData = {
@@ -55,11 +65,11 @@ const emptyForm: FormData = {
     family_name: '',
     head_name: '',
     phone: '',
-    address: '',
+    location_id: '',
     purok_id: '',
     pin: '',
     status: 'active',
-    beneficiary_count: '',
+    household_member: '',
 };
 
 const statusBadge: Record<string, string> = {
@@ -70,10 +80,12 @@ const statusBadge: Record<string, string> = {
 export default function Families({
     families,
     puroks,
+    locations = [],
     staff = [],
 }: {
     families: Family[];
     puroks: Purok[];
+    locations: Location[];
     staff: Staff[];
 }) {
     const [showForm, setShowForm] = useState(false);
@@ -110,7 +122,7 @@ export default function Families({
                     family.family_name,
                     family.head_name,
                     family.phone,
-                    family.address,
+                    family.location?.name,
                     family.purok?.name,
                 ]
                     .filter(Boolean)
@@ -142,11 +154,11 @@ export default function Families({
             family_name: family.family_name,
             head_name: family.head_name,
             phone: family.phone ?? '',
-            address: family.address ?? '',
+            location_id: family.location_id ? String(family.location_id) : '',
             purok_id: String(family.purok_id),
             pin: '',
             status: family.status,
-            beneficiary_count: family.beneficiary_count,
+            household_member: family.household_member,
         });
 
         setShowForm(true);
@@ -240,7 +252,7 @@ export default function Families({
 
                     <input
                         className="input-field pl-10"
-                        placeholder="Search family ID, family name, head, phone, or Purok..."
+                        placeholder="Search family ID, family name, head, phone, location, or Purok..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                     />
@@ -255,8 +267,9 @@ export default function Families({
                             <th className="px-4 py-3">Family</th>
                             <th className="px-4 py-3">Head of Family</th>
                             <th className="px-4 py-3">Phone</th>
-                            <th className="px-4 py-3">Beneficiaries</th>
+                            <th className="px-4 py-3">Household Member</th>
                             <th className="px-4 py-3">Purok</th>
+                            <th className="px-4 py-3">Location</th>
                             <th className="px-4 py-3">Status</th>
                             <th className="px-4 py-3 text-right">Actions</th>
                         </tr>
@@ -266,7 +279,7 @@ export default function Families({
                         {filteredFamilies.length === 0 && (
                             <tr>
                                 <td
-                                    colSpan={7}
+                                    colSpan={8}
                                     className="px-4 py-10 text-center text-slate-400"
                                 >
                                     {search
@@ -302,12 +315,18 @@ export default function Families({
                                 </td>
 
                                 <td className="px-4 py-3 text-slate-600">
-                                    {family.beneficiary_count}
+                                    {family.household_member}
                                 </td>
 
                                 <td className="px-4 py-3">
                                     <span className="badge badge-blue">
                                         {family.purok?.name ?? 'Unassigned'}
+                                    </span>
+                                </td>
+
+                                <td className="px-4 py-3">
+                                    <span className="badge badge-slate">
+                                        {family.location?.name ?? 'Unassigned'}
                                     </span>
                                 </td>
 
@@ -434,21 +453,28 @@ export default function Families({
                             </p>
                         </div>
 
-                        {/* Beneficiary */}
+                        {/* Household Member */}
                         <div>
-                            <label className="label">Beneficiary count</label>
+                            <label className="label">household member</label>
+
                             <input
                                 type="number"
                                 min={1}
                                 className="input-field"
-                                value={form.data.beneficiary_count}
+                                value={form.data.household_member}
                                 onChange={(e) =>
                                     form.setData(
-                                        'beneficiary_count',
+                                        'household_member',
                                         e.target.value,
                                     )
                                 }
                             />
+
+                            {form.errors.household_member && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.household_member}
+                                </p>
+                            )}
                         </div>
 
                         {/* Purok */}
@@ -478,6 +504,36 @@ export default function Families({
                             )}
                         </div>
 
+                        {/* Location */}
+                        <div>
+                            <label className="label">Location</label>
+
+                            <select
+                                className="input-field"
+                                value={form.data.location_id}
+                                onChange={(e) =>
+                                    form.setData('location_id', e.target.value)
+                                }
+                            >
+                                <option value="">Select Location</option>
+
+                                {locations.map((location) => (
+                                    <option
+                                        key={location.id}
+                                        value={location.id}
+                                    >
+                                        {location.name}
+                                    </option>
+                                ))}
+                            </select>
+
+                            {form.errors.location_id && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.location_id}
+                                </p>
+                            )}
+                        </div>
+
                         {/* Status */}
                         <div>
                             <label className="label">Status</label>
@@ -490,22 +546,9 @@ export default function Families({
                                 }
                             >
                                 <option value="active">Active</option>
+
                                 <option value="inactive">Inactive</option>
                             </select>
-                        </div>
-
-                        {/* Address */}
-                        <div className="sm:col-span-2">
-                            <label className="label">Address</label>
-
-                            <input
-                                className="input-field"
-                                value={form.data.address}
-                                onChange={(e) =>
-                                    form.setData('address', e.target.value)
-                                }
-                                placeholder="Complete address"
-                            />
                         </div>
 
                         {/* PIN */}

@@ -11,8 +11,20 @@ class QrScan extends Model
     use HasFactory;
 
     protected $fillable = [
-        'resource_id', 'location_id', 'scanned_by', 'scan_type', 'recipient_name',
-        'quantity_change', 'notes', 'scanned_at',
+        'resource_id',
+        'destination_resource_id',
+
+        'location_id',
+        'from_location_id',
+        'to_location_id',
+
+        'scanned_by',
+
+        'scan_type',
+        'recipient_name',
+        'quantity_change',
+        'notes',
+        'scanned_at',
     ];
 
     protected function casts(): array
@@ -25,16 +37,47 @@ class QrScan extends Model
 
     public function resource(): BelongsTo
     {
-        return $this->belongsTo(Resource::class);
+        return $this->belongsTo(
+            Resource::class
+        );
+    }
+
+    public function destinationResource(): BelongsTo
+    {
+        return $this->belongsTo(
+            Resource::class,
+            'destination_resource_id'
+        );
     }
 
     public function location(): BelongsTo
     {
-        return $this->belongsTo(Location::class);
+        return $this->belongsTo(
+            Location::class
+        );
+    }
+
+    public function fromLocation(): BelongsTo
+    {
+        return $this->belongsTo(
+            Location::class,
+            'from_location_id'
+        );
+    }
+
+    public function toLocation(): BelongsTo
+    {
+        return $this->belongsTo(
+            Location::class,
+            'to_location_id'
+        );
     }
 
     public function scanner(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'scanned_by');
+        return $this->belongsTo(
+            User::class,
+            'scanned_by'
+        );
     }
 }

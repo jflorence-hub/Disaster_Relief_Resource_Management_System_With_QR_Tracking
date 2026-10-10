@@ -16,7 +16,7 @@ class Family extends Authenticatable
         'family_name',
         'head_name',
         'phone',
-        'beneficiary_count',
+        'household_member',
         'address',
         'purok_id',
         'location_id',
@@ -30,23 +30,43 @@ class Family extends Authenticatable
         'api_token',
     ];
 
+    /**
+     * Family's Purok.
+     */
     public function purok(): BelongsTo
     {
-        return $this->belongsTo(Purok::class);
+        return $this->belongsTo(
+            Purok::class
+        );
     }
 
+    /**
+     * Family's location.
+     */
     public function location(): BelongsTo
     {
-        return $this->belongsTo(Location::class);
+        return $this->belongsTo(
+            Location::class
+        );
     }
 
+    /**
+     * Family's distribution records.
+     */
     public function distributions(): HasMany
     {
-        return $this->hasMany(Distribution::class);
+        return $this->hasMany(
+            Distribution::class
+        );
     }
 
-    public function beneficiaries(): HasMany
+    /**
+     * Family beneficiaries.
+     */
+    public function household_member(): HasMany
     {
-        return $this->hasMany(Beneficiary::class);
+        return $this->hasMany(
+            HouseholdMember::class
+        );
     }
 }

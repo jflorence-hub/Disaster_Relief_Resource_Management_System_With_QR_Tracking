@@ -11,8 +11,16 @@ class Location extends Model
     use HasFactory;
 
     protected $fillable = [
-        'name', 'type', 'address', 'city', 'latitude', 'longitude',
-        'capacity', 'contact_person', 'contact_phone', 'status',
+        'name',
+        'type',
+        'address',
+        'city',
+        'latitude',
+        'longitude',
+        'capacity',
+        'contact_person',
+        'contact_phone',
+        'status',
     ];
 
     protected function casts(): array
@@ -27,6 +35,11 @@ class Location extends Model
     public function resources(): HasMany
     {
         return $this->hasMany(Resource::class);
+    }
+
+    public function families(): HasMany
+    {
+        return $this->hasMany(Family::class);
     }
 
     public function distributions(): HasMany

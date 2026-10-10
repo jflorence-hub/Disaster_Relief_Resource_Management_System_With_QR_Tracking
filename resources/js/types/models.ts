@@ -23,13 +23,22 @@ export interface Location {
     resources_count?: number;
     resources_sum_quantity?: number | null;
     completed_distributions_count?: number;
-    beneficiaries_served?: number | null;
+    household_member_served?: number | null;
 }
 
 export interface ResourceItem {
     id: number;
     name: string;
-    category: 'food' | 'water' | 'medical' | 'shelter' | 'clothing' | 'hygiene' | 'tools' | 'set' | 'other';
+    category:
+        | 'food'
+        | 'water'
+        | 'medical'
+        | 'shelter'
+        | 'clothing'
+        | 'hygiene'
+        | 'tools'
+        | 'set'
+        | 'other';
     sku: string;
     qr_code: string;
     quantity: number;
@@ -43,15 +52,15 @@ export interface ResourceItem {
 }
 
 export interface Distribution {
-    family_id?: number | null;
+    family_id?: number;
     family?: {
-    id: number;
-    family_id: string;
-    family_name: string;
-    head_name: string;
-    phone?: string | null;
-    beneficiary_count: number;
-    purok_id: number;
+        id: number;
+        family_id: string;
+        family_name: string;
+        head_name: string;
+        phone?: string | null;
+        household_member: number;
+        purok_id: number;
     };
     id: number;
     qr_code: string | null;
@@ -63,7 +72,7 @@ export interface Distribution {
     additional_quantity: number | null;
     recipient_name: string;
     recipient_contact: string | null;
-    beneficiary_count: number;
+    household_member: number;
     distribution_date: string;
     status: 'pending' | 'in_transit' | 'completed' | 'cancelled';
     notes: string | null;
@@ -75,17 +84,34 @@ export interface Distribution {
 
 export interface QrScan {
     id: number;
+
     resource_id: number;
-    location_id: number | null;
-    scanned_by: number;
-    scan_type: 'check_in' | 'check_out' | 'audit' | 'transfer';
-    recipient_name: string | null;
+    destination_resource_id?: number | null;
+
+    location_id?: number | null;
+    from_location_id?: number | null;
+    to_location_id?: number | null;
+
+    scanned_by?: number | null;
+
+    scan_type: string;
+    recipient_name?: string | null;
     quantity_change: number;
-    notes: string | null;
+    notes?: string | null;
     scanned_at: string;
-    resource?: { id: number; name: string; qr_code: string; unit: string };
-    location?: { id: number; name: string } | null;
-    scanner?: { id: number; name: string } | null;
+
+    resource?: ResourceItem;
+    destination_resource?: ResourceItem;
+
+    location?: Location;
+
+    from_location?: Location;
+    to_location?: Location;
+
+    scanner?: {
+        id: number;
+        name: string;
+    };
 }
 
 export interface TeamMember {

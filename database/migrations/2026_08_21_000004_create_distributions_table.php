@@ -16,7 +16,7 @@ return new class extends Migration
             $table->unsignedInteger('quantity');
             $table->string('recipient_name');
             $table->string('recipient_contact')->nullable();
-            $table->unsignedInteger('beneficiary_count')->default(1);
+            $table->unsignedInteger('household_member')->default(1);
             $table->dateTime('distribution_date');
             $table->enum('status', ['pending', 'in_transit', 'completed', 'cancelled'])->default('pending');
             $table->text('notes')->nullable();

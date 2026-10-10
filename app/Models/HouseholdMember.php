@@ -5,11 +5,11 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class Beneficiary extends Model
+class HouseholdMember extends Model
 {
     protected $fillable = [
         'family_id',
-        'beneficiary_number',
+        'household_member_number',
     ];
 
     public function family(): BelongsTo

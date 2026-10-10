@@ -34,7 +34,7 @@ Route::middleware('auth')->group(function () {
         ->only(['index', 'store', 'update', 'destroy']);
 
     Route::resource('families', FamilyController::class)
-    ->only(['index', 'store', 'update', 'destroy']);
+        ->only(['index', 'store', 'update', 'destroy']);
 
     Route::resource('resources', ResourceController::class)
         ->only(['index', 'store', 'update', 'destroy']);
@@ -51,6 +51,7 @@ Route::middleware('auth')->group(function () {
     Route::get('reports/export/inventory', [ReportController::class, 'exportInventory'])->name('reports.export.inventory');
     Route::get('reports/export/distributions', [ReportController::class, 'exportDistributions'])->name('reports.export.distributions');
     Route::get('reports/export/qr-scans', [ReportController::class, 'exportQrScans'])->name('reports.export.qr-scans');
+    
 
     // Administrator-only areas
     Route::middleware('admin')->group(function () {

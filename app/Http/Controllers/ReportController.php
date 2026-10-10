@@ -22,7 +22,7 @@ class ReportController extends Controller
             ->get();
 
         $distributionsByMonth = Distribution::query()
-            ->select(DB::raw("DATE_FORMAT(distribution_date, '%Y-%m') as month"), DB::raw('sum(quantity) as total_quantity'), DB::raw('sum(beneficiary_count) as beneficiaries'))
+            ->select(DB::raw("DATE_FORMAT(distribution_date, '%Y-%m') as month"), DB::raw('sum(quantity) as total_quantity'), DB::raw('sum(household_member) as household_member'))
             ->where('status', 'completed')
             ->groupBy('month')
             ->orderBy('month')
@@ -48,7 +48,7 @@ class ReportController extends Controller
             'total_resources' => (int) Resource::sum('quantity'),
             'total_locations' => Location::count(),
             'total_distributions' => Distribution::where('status', 'completed')->count(),
-            'total_beneficiaries' => (int) Distribution::where('status', 'completed')->sum('beneficiary_count'),
+            'total_household_member' => (int) Distribution::where('status', 'completed')->sum('household_member'),
             'low_stock_count' => $lowStock->count(),
             'total_scans' => QrScan::count(),
         ];
@@ -78,8 +78,8 @@ class ReportController extends Controller
             ->orderByDesc('distribution_date')
             ->get();
 
-        return $this->csvResponse('distribution-report.csv', ['Date', 'Resource', 'Quantity', 'Recipient', 'Beneficiaries', 'Location', 'Status', 'Distributed By'], $distributions->map(fn ($d) => [
-            $d->distribution_date, $d->resource?->name, $d->quantity, $d->recipient_name, $d->beneficiary_count, $d->location?->name, $d->status, $d->distributor?->name,
+        return $this->csvResponse('distribution-report.csv', ['Date', 'Resource', 'Quantity', 'Recipient', 'Household Member', 'Location', 'Status', 'Distributed By'], $distributions->map(fn ($d) => [
+            $d->distribution_date, $d->resource?->name, $d->quantity, $d->recipient_name, $d->household_member, $d->location?->name, $d->status, $d->distributor?->name,
         ]));
     }
 
