@@ -11,4 +11,25 @@ class StaffFamilyController extends Controller {
   $families->each(function(Family $family){$family->setAttribute('latest_distribution',$family->distributions->first());});
   return response()->json(['staff'=>['id'=>$staff->id,'name'=>$staff->name,'purok_id'=>$staff->purok_id,'purok'=>optional($staff->purok)->name],'families'=>$families]);
  }
+
+ public function members(Family $family): JsonResponse {
+  $members = $family->household_member()
+   ->orderBy('household_member_number')
+   ->get(['id','household_member_number','name'])
+   ->map(fn ($m) => [
+    'id'     => $m->id,
+    'number' => $m->household_member_number,
+    'name'   => $m->display_name,
+   ]);
+
+  return response()->json([
+   'family' => [
+    'id'          => $family->id,
+    'family_id'   => $family->family_id,
+    'family_name' => $family->family_name,
+    'head_name'   => $family->head_name,
+   ],
+   'members' => $members,
+  ]);
+ }
 }

@@ -16,31 +16,63 @@ class FamilyAuthController extends Controller
     public function register(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'family_name' => 'required|string|max:255',
-            'head_name' => 'required|string|max:255',
-            'email' => 'required|email|max:255|unique:families,email',
-            'phone' => 'required|string|max:50|regex:/^09[0-9]{9}$/|unique:families,phone',
-            'address' => 'required|string|max:2000',
+            'family_name'    => 'required|string|max:255',
+            'head_name'      => 'required|string|max:255',
+            'email'          => 'required|email|max:255|unique:families,email',
+            'phone'          => 'required|string|max:50|regex:/^09[0-9]{9}$/|unique:families,phone',
+            'address'        => 'required|string|max:2000',
             'household_member' => 'required|integer|min:1|max:100',
-            'purok_id' => 'required|exists:puroks,id',
-            'location_id' => 'required|exists:locations,id',
-            'pin' => ['required', 'string', 'regex:/^[0-9]{4,6}$/'],
+            'purok_id'       => 'required|exists:puroks,id',
+            'location_id'    => 'required|exists:locations,id',
+            'pin'            => ['required', 'string', 'regex:/^[0-9]{4,6}$/'],
+            'member_names'   => 'required|array|min:1',
+            'member_names.*' => 'required|string|max:255',
         ]);
+
+        // Check for duplicate member names (case-insensitive) against existing records.
+        foreach ($data['member_names'] as $name) {
+            $exists = \App\Models\HouseholdMember::whereRaw(
+                'LOWER(TRIM(name)) = ?',
+                [strtolower(trim($name))]
+            )->exists();
+
+            if ($exists) {
+                return response()->json([
+                    'message' => "The name \"{$name}\" is already registered as a household member in another family.",
+                    'errors'  => ['member_names' => ["The name \"{$name}\" already exists in the system."]],
+                ], 422);
+            }
+        }
 
         $data['email'] = strtolower(trim($data['email']));
         do { $familyId = 'FAM-' . strtoupper(Str::random(8)); }
         while (Family::where('family_id', $familyId)->exists());
 
         $family = Family::create([
-            ...$data,
-            'family_id' => $familyId,
-            'pin' => Hash::make($data['pin']),
-            'status' => 'active',
+            'family_name'      => $data['family_name'],
+            'head_name'        => $data['head_name'],
+            'email'            => $data['email'],
+            'phone'            => $data['phone'],
+            'address'          => $data['address'],
+            'household_member' => count($data['member_names']),
+            'purok_id'         => $data['purok_id'],
+            'location_id'      => $data['location_id'],
+            'family_id'        => $familyId,
+            'pin'              => Hash::make($data['pin']),
+            'status'           => 'active',
         ]);
+
+        // Create HouseholdMember records with names.
+        foreach ($data['member_names'] as $index => $name) {
+            $family->household_member()->create([
+                'household_member_number' => $index + 1,
+                'name'                    => trim($name),
+            ]);
+        }
 
         return response()->json([
             'message' => 'Family registered successfully. Please sign in.',
-            'family' => $this->payload($family->load(['location:id,name', 'purok:id,name'])),
+            'family'  => $this->payload($family->load(['location:id,name', 'purok:id,name'])),
         ], 201);
     }
 

@@ -42,6 +42,7 @@ Route::middleware(['auth.token', 'auth.staff'])->group(function () {
     Route::post('logout', [AuthController::class, 'logout']);
 
     Route::get('staff/families', [StaffFamilyController::class, 'index']);
+    Route::get('families/{family}/members', [StaffFamilyController::class, 'members']);
 
     // Distribution
     Route::get('distributions/history', [DistributionController::class, 'history']);

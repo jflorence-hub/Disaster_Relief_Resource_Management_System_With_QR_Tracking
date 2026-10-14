@@ -8,6 +8,29 @@ export interface AuthUser {
     location_id: number | null;
 }
 
+export interface FamilyMember {
+    id: number;
+    household_member_number: number;
+    name?: string | null;
+}
+
+export interface FamilyModel {
+    id: number;
+    family_id: string;
+    family_name: string;
+    head_name: string;
+    phone?: string | null;
+    household_member: number;
+    address?: string | null;
+    purok_id: number;
+    location_id?: number | null;
+    pin?: string;
+    status: string;
+    purok?: { id: number; name: string; code?: string };
+    location?: { id: number; name: string; status: string };
+    household_member_list?: FamilyMember[];
+}
+
 export interface Location {
     id: number;
     name: string;

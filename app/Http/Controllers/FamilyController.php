@@ -25,6 +25,7 @@ class FamilyController extends Controller
             ->with([
                 'purok:id,name',
                 'location:id,name,status',
+                'household_member:id,family_id,household_member_number,name',
             ])
             ->when(
                 $user->role === 'staff',
@@ -161,7 +162,28 @@ class FamilyController extends Controller
                 'required',
                 'in:active,inactive',
             ],
+
+            'member_names'   => ['nullable', 'array'],
+            'member_names.*' => ['nullable', 'string', 'max:255'],
         ]);
+
+        /*
+         * Duplicate member name check (case-insensitive).
+         */
+        if (!empty($data['member_names'])) {
+            foreach (array_filter($data['member_names'], fn ($n) => !empty(trim((string) $n))) as $name) {
+                $exists = \App\Models\HouseholdMember::whereRaw(
+                    'LOWER(TRIM(name)) = ?',
+                    [strtolower(trim($name))]
+                )->exists();
+
+                if ($exists) {
+                    return back()->withErrors([
+                        'member_names' => "The name \"{$name}\" is already registered as a household member in another family.",
+                    ]);
+                }
+            }
+        }
 
         /*
          * Staff can only register families
@@ -214,7 +236,7 @@ class FamilyController extends Controller
             /*
              * Create beneficiaries.
              */
-            $this->syncHousehold_member($family);
+            $this->syncHousehold_member($family, $data['member_names'] ?? null);
 
             // Initial relief is intentionally unassigned until an administrator creates a schedule.
             $scheduledAt = DB::table('distribution_schedules')->orderByDesc('id')->value('scheduled_at') ?? now();
@@ -247,7 +269,8 @@ class FamilyController extends Controller
      * Create beneficiary records.
      */
     private function syncHousehold_member(
-        Family $family
+        Family $family,
+        ?array $names = null
     ): void {
         $count =
             (int) $family->household_member;
@@ -264,8 +287,8 @@ class FamilyController extends Controller
             $family
                 ->household_member()
                 ->create([
-                    'household_member_number' =>
-                        $i,
+                    'household_member_number' => $i,
+                    'name' => $names[$i - 1] ?? null,
                 ]);
         }
     }
@@ -345,6 +368,9 @@ class FamilyController extends Controller
                 'required',
                 'in:active,inactive',
             ],
+
+            'member_names'   => ['nullable', 'array'],
+            'member_names.*' => ['nullable', 'string', 'max:255'],
         ]);
 
         if (
@@ -394,7 +420,7 @@ class FamilyController extends Controller
             /*
              * Recreate beneficiaries.
              */
-            $this->syncHousehold_member($family);
+            $this->syncHousehold_member($family, $data['member_names'] ?? null);
 
             /*
              * Keep existing distribution
