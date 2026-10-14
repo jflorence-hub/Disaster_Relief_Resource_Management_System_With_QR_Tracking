@@ -8,6 +8,10 @@ import { Camera, ChevronDown, ChevronRight, History, ScanLine, Trash2 } from 'lu
 import { FormEventHandler, useCallback, useEffect, useMemo, useState } from 'react';
 
 const scanTypeBadge: Record<string, string> = {
+    released: 'badge-green',
+    returned: 'badge-amber',
+    verified: 'badge-blue',
+    // legacy values kept for backward-compat with old records
     check_in:  'badge-green',
     check_out: 'badge-amber',
     audit:     'badge-blue',
@@ -36,7 +40,7 @@ const emptyForm = (): FormData => ({
     qr_code: '',
     family_id: '',
     location_id: '',
-    scan_type: 'check_in',
+    scan_type: 'released',
     quantity_change: 1,
     scan_date: todayStr(),
     scan_time: nowTimeStr(),
@@ -60,6 +64,7 @@ export default function QrTracking({
     // Auto-filled display fields
     const [familyHead, setFamilyHead] = useState('');
     const [purokName, setPurokName]   = useState('');
+    const [reliefName, setReliefName] = useState('');
 
     // History accordion — which date groups are open
     const [openDates, setOpenDates] = useState<Set<string>>(new Set());
@@ -104,6 +109,7 @@ export default function QrTracking({
         form.setData(emptyForm());
         setFamilyHead('');
         setPurokName('');
+        setReliefName('');
         setCameraOn(false);
         setShowScan(true);
     };
@@ -113,6 +119,7 @@ export default function QrTracking({
         form.setData('family_id', familyId);
         setFamilyHead(fam?.head_name ?? '');
         setPurokName(fam?.purok ?? '');
+        setReliefName(fam?.latest_distribution?.resource?.name ?? '');
     };
 
     // When the camera decodes a QR, store it and try to match a family
@@ -144,6 +151,7 @@ export default function QrTracking({
                 form.reset();
                 setFamilyHead('');
                 setPurokName('');
+                setReliefName('');
             },
         });
     };
@@ -248,7 +256,7 @@ export default function QrTracking({
                                                                 {/* SCAN STATUS */}
                                                                 <td className="px-4 py-2.5">
                                                                     <span className={`badge ${scanTypeBadge[s.scan_type] ?? 'badge-blue'} capitalize`}>
-                                                                        {s.scan_type.replace('_', ' ')}
+                                                                        {s.scan_type.replace(/_/g, ' ')}
                                                                     </span>
                                                                 </td>
                                                                 {/* SCANNED BY */}
@@ -355,11 +363,11 @@ export default function QrTracking({
                                 <input
                                     type="text"
                                     className="input-field bg-slate-50"
-                                    value=""
+                                    value={reliefName}
                                     readOnly
                                     placeholder="—"
                                 />
-                                <p className="mt-1 text-xs text-slate-400">Linked via family distribution record.</p>
+                                <p className="mt-1 text-xs text-slate-400">Auto-filled from family's latest distribution.</p>
                             </div>
 
                             {/* QUANTITY */}
@@ -385,10 +393,9 @@ export default function QrTracking({
                                     value={form.data.scan_type}
                                     onChange={(e) => form.setData('scan_type', e.target.value)}
                                 >
-                                    <option value="check_in">Check In</option>
-                                    <option value="check_out">Check Out</option>
-                                    <option value="audit">Audit</option>
-                                    <option value="transfer">Transfer</option>
+                                    <option value="released">Released</option>
+                                    <option value="returned">Returned</option>
+                                    <option value="verified">Verified</option>
                                 </select>
                             </div>
 

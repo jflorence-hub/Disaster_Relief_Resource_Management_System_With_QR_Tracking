@@ -49,14 +49,25 @@ class QrTrackingController extends Controller
             'qr_code'         => 'nullable|string',
             'family_id'       => 'nullable|exists:families,id',
             'location_id'     => 'nullable|exists:locations,id',
-            'scan_type'       => 'required|in:check_in,check_out,audit,transfer',
+            'scan_type'       => 'required|in:released,returned,verified',
             'quantity_change'  => 'required|integer|min:1',
             'scan_date'       => 'nullable|date',
             'scan_time'       => 'nullable|string|max:10',
         ]);
 
+        // Resolve resource_id from the family's latest distribution
+        $resourceId = null;
+        if (! empty($validated['family_id'])) {
+            $dist = \App\Models\Distribution::where('family_id', $validated['family_id'])
+                ->whereNotIn('status', ['cancelled'])
+                ->orderByDesc('distribution_date')
+                ->first(['resource_id']);
+            $resourceId = $dist?->resource_id;
+        }
+
         $scan = QrScan::create([
             'family_id'       => $validated['family_id'] ?? null,
+            'resource_id'     => $resourceId,
             'location_id'     => $validated['location_id'] ?? null,
             'scanned_by'      => $request->user()->id,
             'scan_type'       => $validated['scan_type'],
@@ -69,6 +80,7 @@ class QrTrackingController extends Controller
         $scan->load([
             'family:id,family_id,family_name,head_name,purok_id',
             'family.purok:id,name',
+            'resource:id,name,unit',
             'location:id,name',
             'scanner:id,name',
         ]);

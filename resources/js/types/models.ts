@@ -135,6 +135,13 @@ export interface FamilyOption {
     family_name: string;
     head_name: string;
     purok?: string | null;
+    latest_distribution?: {
+        resource?: {
+            id: number;
+            name: string;
+            unit: string;
+        } | null;
+    } | null;
 }
 
 export interface TeamMember {
