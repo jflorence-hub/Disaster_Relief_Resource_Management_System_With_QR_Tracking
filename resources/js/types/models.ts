@@ -150,9 +150,19 @@ export interface TeamMember {
     email: string;
     role: 'admin' | 'staff';
     phone: string | null;
-    status: 'active' | 'on_leave' | 'inactive';
+    status: 'active' | 'on_leave' | 'inactive' | 'pending';
     location_id: number | null;
     responsibilities: string | null;
     purok_id: number;
     location?: { id: number; name: string } | null;
+}
+
+export interface PendingStaff {
+    id: number;
+    name: string;
+    email: string;
+    phone: string | null;
+    purok_id: number | null;
+    purok: { id: number; name: string } | null;
+    created_at: string;
 }

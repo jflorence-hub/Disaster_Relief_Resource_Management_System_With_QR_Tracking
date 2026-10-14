@@ -1,33 +1,33 @@
-import { Head, Link, useForm } from '@inertiajs/react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
 import { LifeBuoy } from 'lucide-react';
 import { FormEventHandler } from 'react';
 
-export default function Register() {
-    const { data, setData, post, processing, errors, reset } = useForm({
+export default function Register({ puroks }: { puroks: { id: number; name: string; code: string }[] }) {
+    const { data, setData, post, processing, errors } = useForm({
         name: '',
         email: '',
         phone: '',
-        password: '',
-        password_confirmation: '',
+        purok_id: '',
     });
 
     const submit: FormEventHandler = (e) => {
         e.preventDefault();
         post('/register', {
-            onError: () => reset('password', 'password_confirmation'),
+            onError: () => {},
+            onSuccess: () => router.visit('/login'),
         });
     };
 
     return (
         <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
-            <Head title="Register" />
+            <Head title="Request Staff Access" />
             <div className="w-full max-w-md">
                 <div className="mb-6 flex flex-col items-center">
                     <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white">
                         <LifeBuoy size={24} />
                     </div>
-                    <h1 className="text-xl font-bold text-slate-800">Create an account</h1>
-                    <p className="mt-1 text-sm text-slate-500">Join the relief coordination team</p>
+                    <h1 className="text-xl font-bold text-slate-800">Request Staff Access</h1>
+                    <p className="mt-1 text-sm text-slate-500">Your request will be reviewed by an admin before activation.</p>
                 </div>
 
                 <div className="card">
@@ -61,26 +61,24 @@ export default function Register() {
                             />
                         </div>
                         <div>
-                            <label className="label">Password</label>
-                            <input
-                                type="password"
+                            <label className="label">Assigned Purok</label>
+                            <select
                                 className="input-field"
-                                value={data.password}
-                                onChange={(e) => setData('password', e.target.value)}
-                            />
-                            {errors.password && <p className="mt-1 text-xs text-red-600">{errors.password}</p>}
-                        </div>
-                        <div>
-                            <label className="label">Confirm password</label>
-                            <input
-                                type="password"
-                                className="input-field"
-                                value={data.password_confirmation}
-                                onChange={(e) => setData('password_confirmation', e.target.value)}
-                            />
+                                value={data.purok_id}
+                                onChange={(e) => setData('purok_id', e.target.value)}
+                                required
+                            >
+                                <option value="" disabled>Select a purok</option>
+                                {puroks.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                        {p.name}
+                                    </option>
+                                ))}
+                            </select>
+                            {errors.purok_id && <p className="mt-1 text-xs text-red-600">{errors.purok_id}</p>}
                         </div>
                         <button type="submit" className="btn-primary w-full" disabled={processing}>
-                            {processing ? 'Creating account…' : 'Create account'}
+                            {processing ? 'Submitting…' : 'Submit Request'}
                         </button>
                     </form>
                     <p className="mt-4 text-center text-sm text-slate-500">
@@ -92,7 +90,7 @@ export default function Register() {
                 </div>
 
                 <p className="mt-6 text-center text-xs text-slate-400">
-                    New accounts are created with Staff-level access.
+                    New accounts require admin approval before login is possible.
                 </p>
             </div>
         </div>

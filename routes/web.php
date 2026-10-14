@@ -102,6 +102,9 @@ Route::middleware('auth')->group(function () {
             ->parameters(['team' => 'user'])
             ->only(['index', 'store', 'update', 'destroy']);
 
+        Route::post('team/{user}/approve', [TeamController::class, 'approve'])->name('team.approve');
+        Route::post('team/{user}/reject', [TeamController::class, 'reject'])->name('team.reject');
+
         Route::get('settings', [SettingController::class, 'index'])->name('settings.index');
         Route::patch('settings/profile', [SettingController::class, 'updateProfile'])->name('settings.profile');
         Route::put('settings/password', [SettingController::class, 'updatePassword'])->name('settings.password');

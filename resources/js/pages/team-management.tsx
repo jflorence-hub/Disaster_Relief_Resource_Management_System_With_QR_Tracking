@@ -1,7 +1,7 @@
 import ConfirmDialog from '@/components/confirm-dialog';
 import Modal from '@/components/modal';
 import AppLayout from '@/layouts/app-layout';
-import { Location, TeamMember } from '@/types/models';
+import { Location, PendingStaff, TeamMember } from '@/types/models';
 import { Head, router, useForm } from '@inertiajs/react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { FormEventHandler, useMemo, useState } from 'react';
@@ -18,6 +18,7 @@ const statusBadge: Record<string, string> = {
     active: 'badge-green',
     on_leave: 'badge-amber',
     inactive: 'badge-slate',
+    pending: 'badge-amber',
 };
 
 interface FormData {
@@ -48,10 +49,12 @@ export default function TeamManagement({
     members,
     locations,
     puroks,
+    pendingStaff,
 }: {
     members: TeamMember[];
     locations: Location[];
     puroks: { id: number; name: string; code: string }[];
+    pendingStaff: PendingStaff[];
 }) {
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState<TeamMember | null>(null);
@@ -133,6 +136,66 @@ export default function TeamManagement({
                 >
                     <Plus size={16} /> Add Member
                 </button>
+            </div>
+
+            {/* Pending Registrations Section */}
+            <div className="card mb-6 overflow-hidden p-0">
+                <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
+                    <h2 className="text-sm font-semibold text-slate-700">Pending Registrations</h2>
+                    <span className="inline-flex items-center justify-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                        {pendingStaff.length}
+                    </span>
+                </div>
+                {pendingStaff.length === 0 ? (
+                    <p className="px-4 py-6 text-center text-sm text-slate-400">No pending registrations.</p>
+                ) : (
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="border-b border-slate-100 text-left text-xs text-slate-500 uppercase">
+                                <th className="px-4 py-3">Name / Email</th>
+                                <th className="px-4 py-3">Phone</th>
+                                <th className="px-4 py-3">Requested Purok</th>
+                                <th className="px-4 py-3">Registered On</th>
+                                <th className="px-4 py-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {pendingStaff.map((m) => (
+                                <tr key={m.id} className="border-b border-slate-50 hover:bg-slate-50">
+                                    <td className="px-4 py-3">
+                                        <p className="font-medium text-slate-800">{m.name}</p>
+                                        <p className="text-xs text-slate-400">{m.email}</p>
+                                    </td>
+                                    <td className="px-4 py-3 text-slate-500">{m.phone ?? '—'}</td>
+                                    <td className="px-4 py-3 text-slate-600">{m.purok?.name ?? '—'}</td>
+                                    <td className="px-4 py-3 text-slate-500">
+                                        {new Date(m.created_at).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <div className="flex justify-end gap-1.5">
+                                            <button
+                                                className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700"
+                                                onClick={() => router.post(route('team.approve', m.id))}
+                                            >
+                                                Approve
+                                            </button>
+                                            <button
+                                                className="rounded-lg bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
+                                                onClick={() => {
+                                                    if (window.confirm(`Reject registration request from "${m.name}"? This cannot be undone.`)) {
+                                                        router.post(route('team.reject', m.id));
+                                                    }
+                                                }}
+                                            >
+                                                Reject
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
             </div>
 
             <div className="card overflow-x-auto p-0">
