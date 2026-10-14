@@ -44,7 +44,7 @@ class RegisteredUserController extends Controller
             'status'   => 'pending',
         ]);
 
-        $purokName = Purok::find($request->purok_id)->name;
+        $purokName = Purok::find($request->purok_id)?->name ?? 'N/A';
         $admin = User::where('role', 'admin')->orderBy('id')->first();
 
         if ($admin) {

@@ -39,6 +39,10 @@ class AdminStaffController extends Controller
      */
     public function approveStaff(User $user): JsonResponse
     {
+        if ($user->status !== 'pending') {
+            return response()->json(['message' => 'This user is not pending approval.'], 400);
+        }
+
         $tempPassword    = Str::random(8);
         $user->password  = $tempPassword; // cast will hash it
         $user->status    = 'active';
@@ -62,9 +66,12 @@ class AdminStaffController extends Controller
      */
     public function rejectStaff(User $user): JsonResponse
     {
+        if ($user->status !== 'pending') {
+            return response()->json(['message' => 'This user is not pending approval.'], 400);
+        }
+
         $email = $user->email;
         $name  = $user->name;
-        $user->delete();
 
         Mail::raw(
             "Dear {$name},\n\n"
@@ -75,6 +82,8 @@ class AdminStaffController extends Controller
                     ->subject('Staff Registration Update — Disaster Relief System');
             }
         );
+
+        $user->delete();
 
         return response()->json(['message' => 'Staff registration rejected.']);
     }

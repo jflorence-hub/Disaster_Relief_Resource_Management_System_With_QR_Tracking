@@ -134,8 +134,6 @@ class TeamController extends Controller
         $name = $user->name;
         $email = $user->email;
 
-        $user->delete();
-
         Mail::raw(
             'We regret to inform you that your registration request was not approved. Please contact the administrator for more information.',
             function ($message) use ($email, $name) {
@@ -143,6 +141,8 @@ class TeamController extends Controller
                     ->subject('Staff Registration Update — Disaster Relief System');
             }
         );
+
+        $user->delete();
 
         return back()->with('success', 'Registration request rejected.');
     }

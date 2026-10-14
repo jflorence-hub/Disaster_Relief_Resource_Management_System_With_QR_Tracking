@@ -103,7 +103,7 @@ class AuthController extends Controller
             'status'   => 'pending',
         ]);
 
-        $purokName = Purok::find($validated['purok_id'])->name;
+        $purokName = Purok::find($validated['purok_id'])?->name ?? 'N/A';
         $admin = User::where('role', 'admin')->orderBy('id')->first();
 
         if ($admin) {

@@ -175,7 +175,11 @@ export default function TeamManagement({
                                         <div className="flex justify-end gap-1.5">
                                             <button
                                                 className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700"
-                                                onClick={() => router.post(route('team.approve', m.id))}
+                                                onClick={() => {
+                                                    if (window.confirm(`Approve registration request from "${m.name}"? This will activate their account and send them a temporary password.`)) {
+                                                        router.post(route('team.approve', m.id));
+                                                    }
+                                                }}
                                             >
                                                 Approve
                                             </button>
