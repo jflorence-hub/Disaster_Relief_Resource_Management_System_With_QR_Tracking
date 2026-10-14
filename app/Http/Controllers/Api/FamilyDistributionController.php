@@ -12,24 +12,42 @@ class FamilyDistributionController extends Controller
     public function index(Request $request): JsonResponse
     {
         $family = $request->user();
+        $family->loadMissing(['purok:id,name', 'location:id,name']);
 
         $distributions = Distribution::with([
             'resource:id,name,unit',
             'additionalResource:id,name,unit',
             'location:id,name',
+            'distributor:id,name',
         ])
             ->where('family_id', $family->id)
             ->orderByDesc('distribution_date')
             ->get();
 
+        $householdMembers = $family->household_member()
+            ->orderBy('household_member_number')
+            ->get(['id', 'household_member_number', 'name'])
+            ->map(fn ($m) => [
+                'id'     => $m->id,
+                'number' => $m->household_member_number,
+                'name'   => $m->display_name,
+            ]);
+
         return response()->json([
             'family' => [
-                'id' => $family->id,
-                'family_id' => $family->family_id,
-                'family_name' => $family->family_name,
-                'location_id' => $family->location_id,
+                'id'               => $family->id,
+                'family_id'        => $family->family_id,
+                'family_name'      => $family->family_name,
+                'head_name'        => $family->head_name,
+                'household_member' => $family->household_member,
+                'purok'            => $family->purok ? $family->purok->name : null,
+                'address'          => $family->address,
+                'location'         => $family->location
+                    ? ['id' => $family->location->id, 'name' => $family->location->name]
+                    : null,
             ],
-            'distributions' => $distributions,
+            'distributions'    => $distributions,
+            'household_members' => $householdMembers,
         ]);
     }
 

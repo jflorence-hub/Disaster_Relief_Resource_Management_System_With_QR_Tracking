@@ -129,6 +129,7 @@ export interface QrScan {
 
     scan_date?: string | null;
     scan_time?: string | null;
+    receiver?: string | null;
 
     family?: {
         id: number;

@@ -28,6 +28,7 @@ class Distribution extends Model
         'disaster',
         'family_id',
         'schedule_id',
+        'claimed_by',
     ];
 
     protected function casts(): array

@@ -26,6 +26,7 @@ interface FormData {
     quantity_change: number | string;
     scan_date: string;
     scan_time: string;
+    receiver: string;
 }
 
 function todayStr() {
@@ -44,6 +45,7 @@ const emptyForm = (): FormData => ({
     quantity_change: 1,
     scan_date: todayStr(),
     scan_time: nowTimeStr(),
+    receiver: '',
 });
 
 export default function QrTracking({
@@ -221,6 +223,7 @@ export default function QrTracking({
                                                         <th className="px-4 py-2">Qty</th>
                                                         <th className="px-4 py-2">Scan Status</th>
                                                         <th className="px-4 py-2">Scanned By</th>
+                                                        <th className="px-4 py-2">Claimed by</th>
                                                         <th className="px-4 py-2">Location</th>
                                                         <th className="px-4 py-2">Date</th>
                                                         <th className="px-4 py-2">Time</th>
@@ -261,6 +264,8 @@ export default function QrTracking({
                                                                 </td>
                                                                 {/* SCANNED BY */}
                                                                 <td className="px-4 py-2.5 text-slate-500">{s.scanner?.name ?? '—'}</td>
+                                                                {/* CLAIMED BY */}
+                                                                <td className="px-4 py-2.5 text-slate-500">{s.receiver ?? '—'}</td>
                                                                 {/* LOCATION */}
                                                                 <td className="px-4 py-2.5 text-slate-500">
                                                                     {s.location?.name ?? '—'}
@@ -437,6 +442,19 @@ export default function QrTracking({
                                     onChange={(e) => form.setData('scan_time', e.target.value)}
                                 />
                                 {form.errors.scan_time && <p className="mt-1 text-xs text-red-600">{form.errors.scan_time}</p>}
+                            </div>
+
+                            {/* CLAIMED BY */}
+                            <div className="sm:col-span-2">
+                                <label className="label">Claimed by</label>
+                                <input
+                                    type="text"
+                                    className="input-field"
+                                    placeholder="Name of person claiming relief"
+                                    value={form.data.receiver}
+                                    onChange={(e) => form.setData('receiver', e.target.value)}
+                                />
+                                {form.errors.receiver && <p className="mt-1 text-xs text-red-600">{form.errors.receiver}</p>}
                             </div>
                         </div>
 

@@ -117,7 +117,19 @@ class FamilyAuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json(['family' => $this->payload($request->user()->load(['location:id,name', 'purok:id,name']))]);
+        $family = $request->user()->load(['location:id,name', 'purok:id,name']);
+        $members = $family->household_member()
+            ->orderBy('household_member_number')
+            ->get(['id', 'household_member_number', 'name'])
+            ->map(fn ($m) => [
+                'id'     => $m->id,
+                'number' => $m->household_member_number,
+                'name'   => $m->display_name,
+            ]);
+        return response()->json([
+            'family'            => $this->payload($family),
+            'household_members' => $members,
+        ]);
     }
 
     public function logout(Request $request): JsonResponse

@@ -40,6 +40,7 @@ class QrTrackingController extends Controller
                     'scanned_at'      => $scan->scanned_at,
                     'scan_date'       => $scan->scan_date?->format('Y-m-d'),
                     'scan_time'       => $scan->scan_time,
+                    'receiver'        => $scan->receiver,
 
                     'family' => $scan->family ? [
                         'id'          => $scan->family->id,
@@ -117,6 +118,7 @@ class QrTrackingController extends Controller
             'quantity_change'  => 'required|integer|min:1',
             'scan_date'       => 'nullable|date',
             'scan_time'       => 'nullable|string|max:10',
+            'receiver'        => 'nullable|string|max:255',
         ]);
 
         // Resolve resource_id from the family's latest pending distribution
@@ -139,6 +141,7 @@ class QrTrackingController extends Controller
             'scanned_at'      => now(),
             'scan_date'       => $data['scan_date'] ?? now()->toDateString(),
             'scan_time'       => $data['scan_time'] ?? now()->format('H:i'),
+            'receiver'        => $data['receiver'] ?? null,
         ]);
 
         return back()->with('success', 'Scan recorded successfully.');
