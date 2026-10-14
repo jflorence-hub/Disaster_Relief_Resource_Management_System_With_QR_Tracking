@@ -47,7 +47,7 @@ class AdminStaffController extends Controller
 
         $this->approvalService->approve($user);
 
-        return response()->json(['message' => 'Staff approved.']);
+        return response()->json(['message' => 'Staff approved. An email has been sent to the staff member.']);
     }
 
     /**

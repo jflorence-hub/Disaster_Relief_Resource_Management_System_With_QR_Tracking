@@ -21,7 +21,7 @@ class TeamController extends Controller
     public function index(Request $request): Response
     {
         $members = User::query()
-            ->with('location:id,name')
+            ->with(['location:id,name', 'purok:id,name'])
             ->where('status', '!=', 'pending')
             ->when($request->string('search')->toString(), function ($query, $search) {
                 $query->where(function ($q) use ($search) {
@@ -36,9 +36,9 @@ class TeamController extends Controller
 
         $pendingStaff = User::where('status', 'pending')
             ->where('role', 'staff')
-            ->with('purok:id,name')
+            ->with(['purok:id,name', 'location:id,name'])
             ->orderBy('created_at')
-            ->get(['id', 'name', 'email', 'phone', 'purok_id', 'created_at']);
+            ->get(['id', 'name', 'email', 'phone', 'purok_id', 'location_id', 'created_at']);
 
         return Inertia::render('team-management', [
             'members' => $members,

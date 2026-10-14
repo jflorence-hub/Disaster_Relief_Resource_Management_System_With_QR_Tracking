@@ -101,8 +101,9 @@ class QrTrackingController extends Controller
 
     /**
      * Recent scans, for the mobile app's history tab.
+     * Scoped to the authenticated staff member's own scans.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         $scans = QrScan::with([
             'family:id,family_id,family_name,head_name,purok_id',
@@ -111,6 +112,7 @@ class QrTrackingController extends Controller
             'location:id,name',
             'scanner:id,name',
         ])
+            ->where('scanned_by', $request->user()->id)
             ->orderByDesc('scanned_at')
             ->limit(50)
             ->get();

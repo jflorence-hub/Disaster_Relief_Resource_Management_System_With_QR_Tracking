@@ -44,12 +44,13 @@ class DistributionController extends Controller
     }
 
     /**
-     * Return family relief distributions for scanner history (all statuses).
-     * Also returns schedule groups (unique date+resource+location combos)
-     * for the distribution history filter dropdown.
+     * Return family relief distributions scoped to this staff member's purok.
+     * Also returns schedule groups for the distribution history filter dropdown.
      */
-    public function history(): JsonResponse
+    public function history(Request $request): JsonResponse
     {
+        $staff = $request->user();
+
         $distributions = Distribution::with([
             'resource:id,name,unit',
             'additionalResource:id,name,unit',
@@ -58,6 +59,8 @@ class DistributionController extends Controller
             'family.purok:id,name',
             'distributor:id,name',
         ])
+            // Scope to families in this staff member's assigned purok
+            ->whereHas('family', fn ($q) => $q->where('purok_id', $staff->purok_id))
             ->orderByDesc('distribution_date')
             ->get();
 

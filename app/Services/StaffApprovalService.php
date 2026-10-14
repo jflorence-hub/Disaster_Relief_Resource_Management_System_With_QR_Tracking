@@ -5,42 +5,47 @@ namespace App\Services;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Str;
 
 class StaffApprovalService
 {
     /**
      * Approve a pending staff registration.
-     * Returns the plain temporary password.
+     * Activates the account and notifies the staff member.
      */
-    public function approve(User $user): string
+    public function approve(User $user): void
     {
         if ($user->status !== 'pending') {
             throw new \InvalidArgumentException('User is not pending approval.');
         }
 
-        $tempPassword = Str::random(8);
+        // Load the purok and location the staff selected during registration
+        $user->loadMissing(['purok:id,name', 'location:id,name']);
+        $purokName    = $user->purok?->name    ?? 'your assigned purok';
+        $locationName = $user->location?->name ?? 'your assigned location';
+
         $user->forceFill([
-            'status' => 'active',
-            'password' => $tempPassword, // cast will hash it
-            'must_change_password' => true,
+            'status'               => 'active',
+            'must_change_password' => false,
         ])->save();
 
         try {
             Mail::raw(
-                "Congratulations {$user->name}, your registration has been approved.\n\n"
-                . "Your temporary password is: {$tempPassword}\n\n"
-                . "Please log in and change your password immediately.",
+                "Dear {$user->name},\n\n"
+                . "Your staff registration request for the Disaster Relief Resource Management System "
+                . "has been approved!\n\n"
+                . "Your assignment:\n"
+                . "  Location: {$locationName}\n"
+                . "  Purok:    {$purokName}\n\n"
+                . "You can log in using the email and password you registered with.\n\n"
+                . "Welcome to the team!",
                 function ($message) use ($user) {
                     $message->to($user->email)
-                        ->subject('Staff Registration Approved — Disaster Relief System');
+                        ->subject('Registration Approved — Disaster Relief System');
                 }
             );
         } catch (\Exception $e) {
             Log::error("Failed to send approval email to {$user->email}: {$e->getMessage()}");
         }
-
-        return $tempPassword;
     }
 
     /**
@@ -87,16 +92,19 @@ class StaffApprovalService
             return;
         }
 
-        $purokName = $newStaff->purok?->name ?? 'N/A';
+        $newStaff->loadMissing(['purok:id,name', 'location:id,name']);
+        $purokName    = $newStaff->purok?->name ?? 'N/A';
+        $locationName = $newStaff->location?->name ?? 'N/A';
 
         foreach ($admins as $admin) {
             try {
                 Mail::raw(
                     "A new staff registration request has been submitted.\n\n"
-                    . "Name:  {$newStaff->name}\n"
-                    . "Email: {$newStaff->email}\n"
-                    . "Phone: " . ($newStaff->phone ?? 'N/A') . "\n"
-                    . "Purok: {$purokName}\n\n"
+                    . "Name:     {$newStaff->name}\n"
+                    . "Email:    {$newStaff->email}\n"
+                    . "Phone:    " . ($newStaff->phone ?? 'N/A') . "\n"
+                    . "Location: {$locationName}\n"
+                    . "Purok:    {$purokName}\n\n"
                     . "Please log in to the admin panel to approve or reject this request.",
                     function ($message) use ($admin) {
                         $message->to($admin->email)->subject('New Staff Registration Request');

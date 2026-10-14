@@ -178,6 +178,7 @@ export interface TeamMember {
     responsibilities: string | null;
     purok_id: number;
     location?: { id: number; name: string } | null;
+    purok?: { id: number; name: string } | null;
 }
 
 export interface PendingStaff {
@@ -187,5 +188,7 @@ export interface PendingStaff {
     phone: string | null;
     purok_id: number | null;
     purok: { id: number; name: string } | null;
+    location_id: number | null;
+    location: { id: number; name: string } | null;
     created_at: string;
 }

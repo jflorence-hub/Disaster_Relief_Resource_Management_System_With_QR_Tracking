@@ -92,22 +92,25 @@ class AuthController extends Controller
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'name'     => 'required|string|max:255',
-            'email'    => 'required|email|unique:users,email',
-            'phone'    => ['nullable', 'regex:/^09[0-9]{9}$/'],
-            'purok_id' => 'required|exists:puroks,id',
+            'name'                  => 'required|string|max:255',
+            'email'                 => 'required|email|unique:users,email',
+            'phone'                 => ['nullable', 'regex:/^09[0-9]{9}$/'],
+            'purok_id'              => 'required|exists:puroks,id',
+            'location_id'           => 'required|exists:locations,id',
+            'password'              => 'required|string|min:8|confirmed',
         ]);
 
-        $tempPassword = Hash::make(Str::random(16));
+        $tempPassword = Hash::make($validated['password']);
 
         $newStaff = User::create([
-            'name'     => $validated['name'],
-            'email'    => $validated['email'],
-            'phone'    => $validated['phone'] ?? null,
-            'password' => $tempPassword,
-            'purok_id' => $validated['purok_id'],
-            'role'     => 'staff',
-            'status'   => 'pending',
+            'name'        => $validated['name'],
+            'email'       => $validated['email'],
+            'phone'       => $validated['phone'] ?? null,
+            'password'    => $tempPassword,
+            'purok_id'    => $validated['purok_id'],
+            'location_id' => $validated['location_id'],
+            'role'        => 'staff',
+            'status'      => 'pending',
         ]);
 
         $newStaff->load('purok:id,name');

@@ -15,27 +15,33 @@ class ReportController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $staff = $request->user();
-        $locId = $staff->location_id;
+        $staff  = $request->user();
+        $locId  = $staff->location_id;
+        $purokId = $staff->purok_id;
 
-        $totalResources     = Resource::where('location_id', $locId)->count();
-        $totalFamilies      = Family::where('location_id', $locId)->count();
-        $totalDistributions = Distribution::where('location_id', $locId)->count();
-        $totalScans         = QrScan::where('scanned_by', $staff->id)->count();
+        // Resources are location-scoped (shared at the barangay level)
+        $totalResources = Resource::where('location_id', $locId)->count();
 
-        $completedCount  = Distribution::where('location_id', $locId)->where('status', 'completed')->count();
-        $pendingCount    = Distribution::where('location_id', $locId)->where('status', 'pending')->count();
-        $cancelledCount  = Distribution::where('location_id', $locId)->where('status', 'cancelled')->count();
+        // Families and distributions are purok-scoped (each staff handles their own purok)
+        $totalFamilies      = Family::where('purok_id', $purokId)->count();
+        $totalDistributions = Distribution::whereHas('family', fn ($q) => $q->where('purok_id', $purokId))->count();
+
+        // QR scans are scoped to the staff member's own scans
+        $totalScans = QrScan::where('scanned_by', $staff->id)->count();
+
+        $completedCount  = Distribution::whereHas('family', fn ($q) => $q->where('purok_id', $purokId))->where('status', 'completed')->count();
+        $pendingCount    = Distribution::whereHas('family', fn ($q) => $q->where('purok_id', $purokId))->where('status', 'pending')->count();
+        $cancelledCount  = Distribution::whereHas('family', fn ($q) => $q->where('purok_id', $purokId))->where('status', 'cancelled')->count();
 
         $lowStockCount = Resource::where('location_id', $locId)
             ->whereColumn('quantity', '<=', 'minimum_threshold')
             ->count();
 
-        $householdMemberServed = (int) Distribution::where('location_id', $locId)
+        $householdMemberServed = (int) Distribution::whereHas('family', fn ($q) => $q->where('purok_id', $purokId))
             ->where('status', 'completed')
             ->sum('household_member');
 
-        // Resources by category
+        // Resources by category (location-scoped)
         $resourcesByCategory = Resource::where('location_id', $locId)
             ->select('category', DB::raw('count(*) as count'), DB::raw('sum(quantity) as quantity'))
             ->groupBy('category')
@@ -47,8 +53,8 @@ class ReportController extends Controller
                 'quantity' => (int) $r->quantity,
             ]);
 
-        // Distributions by month (last 6 months)
-        $distributionsByMonth = Distribution::where('location_id', $locId)
+        // Distributions by month (purok-scoped, last 6 months)
+        $distributionsByMonth = Distribution::whereHas('family', fn ($q) => $q->where('purok_id', $purokId))
             ->select(
                 DB::raw("DATE_FORMAT(distribution_date, '%Y-%m') as month"),
                 DB::raw('count(*) as count'),
@@ -64,7 +70,7 @@ class ReportController extends Controller
                 'household_member' => (int) $r->household_member,
             ]);
 
-        // Low stock items detail
+        // Low stock items (location-scoped)
         $lowStockItems = Resource::where('location_id', $locId)
             ->whereColumn('quantity', '<=', 'minimum_threshold')
             ->select('name', 'quantity', 'unit', 'minimum_threshold')
@@ -75,6 +81,28 @@ class ReportController extends Controller
                 'quantity'          => (int) $r->quantity,
                 'unit'              => $r->unit,
                 'minimum_threshold' => (int) $r->minimum_threshold,
+            ]);
+
+        // QR scans by type (staff's own scans)
+        $scansByType = QrScan::where('scanned_by', $staff->id)
+            ->select('scan_type', DB::raw('count(*) as count'))
+            ->groupBy('scan_type')
+            ->orderByDesc('count')
+            ->get()
+            ->map(fn ($r) => [
+                'scan_type' => $r->scan_type ?? 'unknown',
+                'count'     => (int) $r->count,
+            ]);
+
+        // Resources by location (for the staff's location)
+        $resourcesByLocation = \App\Models\Location::where('id', $locId)
+            ->withCount('resources')
+            ->withSum('resources', 'quantity')
+            ->get(['id', 'name'])
+            ->map(fn ($l) => [
+                'location'       => $l->name,
+                'resources_count' => (int) ($l->resources_count ?? 0),
+                'total_quantity'  => (int) ($l->resources_sum_quantity ?? 0),
             ]);
 
         return response()->json([
@@ -93,6 +121,8 @@ class ReportController extends Controller
             'resources_by_category'   => $resourcesByCategory,
             'distributions_by_month'  => $distributionsByMonth,
             'low_stock'               => $lowStockItems,
+            'qr_scans_by_type'        => $scansByType,
+            'resources_by_location'   => $resourcesByLocation,
         ]);
     }
 }

@@ -154,6 +154,7 @@ export default function TeamManagement({
                             <tr className="border-b border-slate-100 text-left text-xs text-slate-500 uppercase">
                                 <th className="px-4 py-3">Name / Email</th>
                                 <th className="px-4 py-3">Phone</th>
+                                <th className="px-4 py-3">Location</th>
                                 <th className="px-4 py-3">Requested Purok</th>
                                 <th className="px-4 py-3">Registered On</th>
                                 <th className="px-4 py-3 text-right">Actions</th>
@@ -167,6 +168,7 @@ export default function TeamManagement({
                                         <p className="text-xs text-slate-400">{m.email}</p>
                                     </td>
                                     <td className="px-4 py-3 text-slate-500">{m.phone ?? '—'}</td>
+                                    <td className="px-4 py-3 text-slate-600">{m.location?.name ?? '—'}</td>
                                     <td className="px-4 py-3 text-slate-600">{m.purok?.name ?? '—'}</td>
                                     <td className="px-4 py-3 text-slate-500">
                                         {new Date(m.created_at).toLocaleDateString()}
@@ -176,8 +178,8 @@ export default function TeamManagement({
                                             <button
                                                 className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700"
                                                 onClick={() => {
-                                                    if (window.confirm(`Approve registration request from "${m.name}"? This will activate their account and send them a temporary password.`)) {
-                                                        router.post(route('team.approve', m.id));
+                                                    if (window.confirm(`Approve registration request from "${m.name}"? Their account will be activated and they will be notified by email.`)) {
+                                                        router.post(`/team/${m.id}/approve`);
                                                     }
                                                 }}
                                             >
@@ -187,7 +189,7 @@ export default function TeamManagement({
                                                 className="rounded-lg bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
                                                 onClick={() => {
                                                     if (window.confirm(`Reject registration request from "${m.name}"? This cannot be undone.`)) {
-                                                        router.post(route('team.reject', m.id));
+                                                        router.post(`/team/${m.id}/reject`);
                                                     }
                                                 }}
                                             >
@@ -257,7 +259,7 @@ export default function TeamManagement({
                                     {m.location?.name ?? '—'}
                                 </td>
                                 <td className="px-4 py-3 text-slate-600">
-                                    {m.purok_id?? '—'}
+                                    {m.purok?.name ?? '—'}
                                 </td>
                                 <td className="px-4 py-3 text-slate-500">
                                     {m.phone ?? '—'}
