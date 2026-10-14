@@ -24,6 +24,7 @@ class QrScan extends Model
 
         'scan_type',
         'recipient_name',
+        'receiver',
         'quantity_change',
         'notes',
         'scanned_at',

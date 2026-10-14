@@ -49,8 +49,10 @@ class QrTrackingController extends Controller
             'qr_code'         => 'nullable|string',
             'family_id'       => 'nullable|exists:families,id',
             'location_id'     => 'nullable|exists:locations,id',
-            'scan_type'       => 'required|in:released,returned,verified',
-            'quantity_change'  => 'required|integer|min:1',
+            'scan_type'       => 'required|in:completed,pending,cancelled',
+            'receiver'        => 'nullable|string|max:255',
+            'resource_id'     => 'nullable|exists:resources,id',
+            'quantity_change' => 'required|integer|min:1',
             'scan_date'       => 'nullable|date',
             'scan_time'       => 'nullable|string|max:10',
         ]);
@@ -65,12 +67,18 @@ class QrTrackingController extends Controller
             $resourceId = $dist?->resource_id;
         }
 
+        // Allow explicit resource_id from the request to override the resolved one
+        if (! empty($validated['resource_id'])) {
+            $resourceId = $validated['resource_id'];
+        }
+
         $scan = QrScan::create([
             'family_id'       => $validated['family_id'] ?? null,
             'resource_id'     => $resourceId,
             'location_id'     => $validated['location_id'] ?? null,
             'scanned_by'      => $request->user()->id,
             'scan_type'       => $validated['scan_type'],
+            'receiver'        => $validated['receiver'] ?? null,
             'quantity_change' => (int) $validated['quantity_change'],
             'scanned_at'      => now(),
             'scan_date'       => $validated['scan_date'] ?? now()->toDateString(),

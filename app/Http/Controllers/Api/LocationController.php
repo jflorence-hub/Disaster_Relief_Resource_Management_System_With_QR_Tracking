@@ -18,11 +18,21 @@ class LocationController extends Controller
 
     public function index(): JsonResponse
     {
-        return response()->json([
-            'locations' => Location::select('id', 'name', 'type', 'city', 'status')
-                ->where('status', '!=', 'inactive')
-                ->orderBy('name')
-                ->get(),
-        ]);
+        $locations = Location::select('id', 'name', 'type', 'address', 'city', 'capacity', 'contact_person', 'contact_phone', 'email', 'status')
+            ->where('status', '!=', 'inactive')
+            ->withCount([
+                'families',
+                'resources',
+                'distributions as completed_distributions_count' => fn ($q) => $q->where('status', 'completed'),
+            ])
+            ->withSum('resources', 'quantity')
+            ->withSum(
+                ['distributions as household_member_served' => fn ($q) => $q->where('status', 'completed')],
+                'household_member'
+            )
+            ->orderBy('name')
+            ->get();
+
+        return response()->json(['locations' => $locations]);
     }
 }

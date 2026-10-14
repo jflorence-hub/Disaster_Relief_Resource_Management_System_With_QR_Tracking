@@ -44,23 +44,35 @@ class DistributionController extends Controller
     }
 
     /**
-     * Return completed family relief distributions for scanner history.
+     * Return family relief distributions for scanner history (all statuses).
+     * Also returns schedule groups (unique date+resource+location combos)
+     * for the distribution history filter dropdown.
      */
-public function history(): JsonResponse
-{
-    $distributions = Distribution::with([
-        'resource:id,name,unit',
-        'additionalResource:id,name,unit',
-        'location:id,name',
-    ])
-        ->where('status', 'completed')
-        ->orderByDesc('distribution_date')
-        ->get();
+    public function history(): JsonResponse
+    {
+        $distributions = Distribution::with([
+            'resource:id,name,unit',
+            'additionalResource:id,name,unit',
+            'location:id,name',
+            'family:id,family_id,family_name,head_name,purok_id',
+            'family.purok:id,name',
+            'distributor:id,name',
+        ])
+            ->orderByDesc('distribution_date')
+            ->get();
 
-    return response()->json([
-        'distributions' => $distributions,
-    ]);
-}
+        // Build schedule groups for the dropdown
+        $schedules = $distributions->map(fn ($d) => [
+            'date'          => $d->distribution_date?->toDateString(),
+            'resource_name' => $d->resource?->name,
+            'location_name' => $d->location?->name,
+        ])->unique(fn ($s) => implode('|', array_values($s)))->values();
+
+        return response()->json([
+            'distributions' => $distributions,
+            'schedules'     => $schedules,
+        ]);
+    }
     public function lookup(Request $request): JsonResponse
     {
         $request->validate(['qr_code' => 'required|string']);
