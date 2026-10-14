@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AdminStaffController;
 use App\Http\Controllers\Api\AnnouncementController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DistributionController;
@@ -84,4 +85,11 @@ Route::middleware('auth.family')->group(function () {
 
     // Announcements for family/household
     Route::get('family/announcements', [AnnouncementController::class, 'familyIndex']);
+});
+
+// Admin API routes
+Route::middleware(['auth.token', 'auth.admin'])->group(function () {
+    Route::get('admin/pending-staff', [AdminStaffController::class, 'pendingStaff']);
+    Route::post('admin/approve-staff/{user}', [AdminStaffController::class, 'approveStaff']);
+    Route::post('admin/reject-staff/{user}', [AdminStaffController::class, 'rejectStaff']);
 });

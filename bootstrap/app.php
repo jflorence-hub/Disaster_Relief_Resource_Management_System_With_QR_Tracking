@@ -15,6 +15,13 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        /*
+         * Trust all proxies so ngrok X-Forwarded-* headers are respected.
+         * This ensures APP_URL, asset URLs, and redirects all use https://
+         * when accessed through an ngrok tunnel.
+         */
+        $middleware->trustProxies(at: '*');
+
         $middleware->web(append: [
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
@@ -24,6 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin' => \App\Http\Middleware\EnsureUserIsAdmin::class,
             'auth.token' => \App\Http\Middleware\AuthenticateApiToken::class,
             'auth.staff' => \App\Http\Middleware\EnsureStaffApiToken::class,
+            'auth.admin' => \App\Http\Middleware\EnsureAdminApiToken::class,
             'auth.family' => \App\Http\Middleware\AuthenticateFamilyApiToken::class,
         ]);
     })

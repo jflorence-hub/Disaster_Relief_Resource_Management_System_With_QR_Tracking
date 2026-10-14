@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Purok;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -84,23 +85,43 @@ class AuthController extends Controller
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'name'                  => 'required|string|max:255',
-            'email'                 => 'required|email|unique:users,email',
-            'phone'                 => ['nullable', 'regex:/^09[0-9]{9}$/'],
-            'password'              => 'required|string|min:8|confirmed',
+            'name'     => 'required|string|max:255',
+            'email'    => 'required|email|unique:users,email',
+            'phone'    => ['nullable', 'regex:/^09[0-9]{9}$/'],
+            'purok_id' => 'required|exists:puroks,id',
         ]);
+
+        $tempPassword = Hash::make(Str::random(16));
 
         User::create([
             'name'     => $validated['name'],
             'email'    => $validated['email'],
             'phone'    => $validated['phone'] ?? null,
-            'password' => $validated['password'],
+            'password' => $tempPassword,
+            'purok_id' => $validated['purok_id'],
             'role'     => 'staff',
             'status'   => 'pending',
         ]);
 
+        $purokName = Purok::find($validated['purok_id'])->name;
+        $admin = User::where('role', 'admin')->orderBy('id')->first();
+
+        if ($admin) {
+            Mail::raw(
+                "A new staff registration request has been submitted.\n\n"
+                . "Name:  {$validated['name']}\n"
+                . "Email: {$validated['email']}\n"
+                . "Phone: " . ($validated['phone'] ?? 'N/A') . "\n"
+                . "Purok: {$purokName}\n\n"
+                . "Please log in to the admin panel to approve or reject this request.",
+                function ($message) use ($admin) {
+                    $message->to($admin->email)->subject('New Staff Registration Request');
+                }
+            );
+        }
+
         return response()->json([
-            'message' => 'Registration successful. Wait for an administrator to activate your account.',
+            'message' => 'Registration request submitted. You will receive an email once approved.',
         ], 201);
     }
 
