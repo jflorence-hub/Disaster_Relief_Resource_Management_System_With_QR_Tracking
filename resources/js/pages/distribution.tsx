@@ -7,6 +7,7 @@ import {
     CheckCircle2,
     Clock3,
     Download,
+    History,
     Pencil,
     QrCode,
     Search,
@@ -49,6 +50,29 @@ interface DistributionRow {
     status: string;
 }
 
+interface ScheduleHistoryEntry {
+    id: number;
+    scheduled_at: string;
+    resource_name: string | null;
+    location_name: string | null;
+    families: {
+        id: number;
+        status: string;
+        quantity: number;
+        additional_quantity: number | null;
+        family_code: string;
+        family_name: string;
+        head_name: string;
+        household_member: number;
+        purok_name: string | null;
+        resource_name: string | null;
+        resource_unit: string | null;
+        additional_resource_name: string | null;
+        additional_resource_unit: string | null;
+        scanned_by: string | null;
+    }[];
+}
+
 interface FormData {
     family_id: number | string;
     resource_id: number | string;
@@ -81,7 +105,11 @@ export default function DistributionPage({
     staff = [],
     families = [],
     currentDate,
+    scheduledAt,
     defaultSetResource,
+    userRole,
+    scheduleHistory = [],
+    puroks = [],
 }: {
     distributions: Distribution[];
     resources: ResourceItem[];
@@ -93,10 +121,48 @@ export default function DistributionPage({
     staff: Staff[];
     families: Family[];
     currentDate: string;
+    scheduledAt: string;
     defaultSetResource?: ResourceItem | null;
+    userRole: string;
+    scheduleHistory: ScheduleHistoryEntry[];
+    puroks: { id: number; name: string }[];
 }) {
     const [search, setSearch] = useState(filters.search ?? '');
     const [selectedStaffId, setSelectedStaffId] = useState('');
+
+    // History dropdown — which past schedule is being viewed
+    const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(null);
+    // History purok filter — which purok to show inside the selected schedule
+    const [selectedHistoryPurok, setSelectedHistoryPurok] = useState<string>('');
+
+    const [scheduleValue, setScheduleValue] = useState(
+        scheduledAt || currentDate,
+    );
+
+    // Selected relief resource for the new distribution schedule
+    const [scheduleResourceId, setScheduleResourceId] = useState('');
+    // Selected location for the new distribution schedule
+    const [scheduleLocationId, setScheduleLocationId] = useState('');
+
+    const saveSchedule = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+
+        if (!scheduleResourceId || !scheduleValue) {
+            return;
+        }
+
+        router.put(
+            '/distribution-schedule',
+            {
+                scheduled_at: scheduleValue,
+                resource_id: Number(scheduleResourceId),
+                location_id: scheduleLocationId ? Number(scheduleLocationId) : null,
+            },
+            {
+                preserveScroll: true,
+            },
+        );
+    };
 
     // ============================================================
     // CRUD STATE
@@ -159,8 +225,9 @@ export default function DistributionPage({
         families.forEach((family) => {
             const distribution = latestDistributionByFamily.get(family.id);
 
-            // Every registered family should have
-            // a real distribution record.
+            // Every registered family must appear, including a family without
+            // an existing distribution row (for example, during a first load).
+            // The backend creates the persisted pending row when the page loads.
             if (!distribution) {
                 return;
             }
@@ -168,18 +235,32 @@ export default function DistributionPage({
             rows.push({
                 family,
                 distribution,
+                // Display a relief only if that resource is in the current
+                // Resources list. This prevents stale distribution rows from
+                // showing deleted or unavailable resources.
+
                 reliefName:
                     distribution.resource?.name ??
-                    defaultSetResource?.name ??
-                    'Set of Goods and Needs',
-                quantity: Number(distribution.quantity ?? 1),
+                    resources.find(
+                        (resource) =>
+                            Number(resource.id) ===
+                            Number(distribution.resource_id),
+                    )?.name ??
+                    'None',
+
+                quantity: Math.max(
+                    1,
+                    Math.ceil(
+                        Math.max(1, Number(family.household_member || 1)) / 3,
+                    ),
+                ),
                 date: distribution.distribution_date,
                 status: distribution.status,
             });
         });
 
         return rows;
-    }, [families, distributions, defaultSetResource]);
+    }, [families, distributions, resources]);
 
     // ============================================================
     // STAFF / PUROK FILTER
@@ -304,9 +385,7 @@ export default function DistributionPage({
 
             location_id: distribution.location_id ?? '',
 
-            distribution_date: distribution.distribution_date
-                ? distribution.distribution_date.substring(0, 10)
-                : currentDate,
+            distribution_date: scheduledAt || currentDate,
 
             status: distribution.status ?? 'pending',
 
@@ -350,7 +429,7 @@ export default function DistributionPage({
                     ? Number(form.data.location_id)
                     : null,
 
-            distribution_date: form.data.distribution_date,
+            distribution_date: scheduledAt || currentDate,
 
             status: form.data.status,
 
@@ -451,10 +530,203 @@ export default function DistributionPage({
         >
             <Head title="Distribution" />
 
-            {/* SUMMARY */}
+            {/* ── DISTRIBUTION HISTORY DROPDOWN ── */}
+            <div className="card mb-5">
+                <div className="flex items-center gap-2 mb-3">
+                    <History size={17} className="text-slate-500" />
+                    <h2 className="font-semibold text-slate-800">Distribution History</h2>
+                </div>
+                <p className="mb-3 text-xs text-slate-500">
+                    Select a past distribution schedule to see which families received relief and their status.
+                </p>
+                <select
+                    className="input-field w-full"
+                    value={selectedScheduleId ?? ''}
+                    onChange={(e) => {
+                        setSelectedScheduleId(e.target.value ? Number(e.target.value) : null);
+                        setSelectedHistoryPurok('');
+                    }}
+                >
+                    <option value="">— Select a distribution schedule —</option>
+                    {scheduleHistory.map((s) => (
+                        <option key={s.id} value={s.id}>
+                            {new Date(s.scheduled_at).toLocaleString('en-US', {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                            })}
+                            {s.resource_name ? ` — ${s.resource_name}` : ''}
+                            {s.location_name ? ` @ ${s.location_name}` : ''}
+                        </option>
+                    ))}
+                </select>
 
-            <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div className="card flex items-center gap-4">
+                {/* HISTORY TABLE */}
+                {selectedScheduleId !== null && (() => {
+                    const schedule = scheduleHistory.find((s) => s.id === selectedScheduleId);
+                    if (!schedule) return null;
+
+                    // Apply purok filter (admin can choose; staff always sees only their own)
+                    const visibleFamilies = selectedHistoryPurok
+                        ? schedule.families.filter((f) => f.purok_name === selectedHistoryPurok)
+                        : schedule.families;
+
+                    const completedCount = visibleFamilies.filter((f) => f.status === 'completed').length;
+                    const pendingCount   = visibleFamilies.filter((f) => f.status === 'pending').length;
+                    const cancelledCount = visibleFamilies.filter((f) => f.status === 'cancelled').length;
+
+                    return (
+                        <div className="mt-4">
+                            {/* Schedule meta — header row with purok dropdown on the right */}
+                            <div className="mb-3 flex flex-wrap items-start justify-between gap-3 rounded-lg bg-slate-50 px-4 py-3 text-sm">
+                                {/* Left: stat chips */}
+                                <div className="flex flex-wrap gap-4">
+                                    {/* Date & Time */}
+                                    <div>
+                                        <span className="text-xs font-medium uppercase text-slate-400">Date &amp; Time</span>
+                                        <p className="font-medium text-slate-800">
+                                            {new Date(schedule.scheduled_at).toLocaleString('en-US', {
+                                                year: 'numeric',
+                                                month: 'long',
+                                                day: 'numeric',
+                                                hour: 'numeric',
+                                                minute: '2-digit',
+                                            })}
+                                        </p>
+                                    </div>
+
+                                    {/* Location — always shown beside date */}
+                                    <div>
+                                        <span className="text-xs font-medium uppercase text-slate-400">Location</span>
+                                        <p className="font-medium text-slate-800">
+                                            {schedule.location_name ?? <span className="font-normal text-slate-400">—</span>}
+                                        </p>
+                                    </div>
+
+                                    {schedule.resource_name && (
+                                        <div>
+                                            <span className="text-xs font-medium uppercase text-slate-400">Relief</span>
+                                            <p className="font-medium text-slate-800">{schedule.resource_name}</p>
+                                        </div>
+                                    )}
+
+                                    {/* Counts (reflect the filtered set) */}
+                                    <div>
+                                        <span className="text-xs font-medium uppercase text-slate-400">Families</span>
+                                        <p className="font-medium text-slate-800">{visibleFamilies.length}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs font-medium uppercase text-slate-400">Completed</span>
+                                        <p className="font-medium text-green-700">{completedCount}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs font-medium uppercase text-slate-400">Pending</span>
+                                        <p className="font-medium text-amber-600">{pendingCount}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-xs font-medium uppercase text-slate-400">Cancelled</span>
+                                        <p className="font-medium text-red-600">{cancelledCount}</p>
+                                    </div>
+                                </div>
+
+                                {/* Right: Purok filter dropdown (admin sees all puroks; staff has only theirs) */}
+                                {userRole === 'admin' && (
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-xs font-medium uppercase text-slate-400">Filter by Purok</span>
+                                        <select
+                                            className="input-field min-w-[180px]"
+                                            value={selectedHistoryPurok}
+                                            onChange={(e) => setSelectedHistoryPurok(e.target.value)}
+                                        >
+                                            <option value="">All Puroks</option>
+                                            {puroks.map((p) => (
+                                                <option key={p.id} value={p.name}>
+                                                    {p.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                            </div>
+
+                            {visibleFamilies.length === 0 ? (
+                                <p className="py-6 text-center text-sm text-slate-400">
+                                    No families found{selectedHistoryPurok ? ` in ${selectedHistoryPurok}` : ''} for this schedule.
+                                </p>
+                            ) : (
+                                <div className="overflow-x-auto rounded-lg border border-slate-100">
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase text-slate-500">
+                                                <th className="px-4 py-2">Family</th>
+                                                <th className="px-4 py-2">Purok</th>
+                                                <th className="px-4 py-2">Family Head</th>
+                                                <th className="px-4 py-2">Members</th>
+                                                <th className="px-4 py-2">Relief</th>
+                                                <th className="px-4 py-2">Scanned By</th>
+                                                <th className="px-4 py-2">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {visibleFamilies.map((f) => (
+                                                <tr key={f.id} className="border-b border-slate-50 hover:bg-slate-50">
+                                                    <td className="px-4 py-2.5">
+                                                        <p className="font-medium text-slate-800">{f.family_name}</p>
+                                                        <p className="text-xs text-slate-400">{f.family_code}</p>
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-slate-600">
+                                                        {f.purok_name ?? <span className="text-slate-300">—</span>}
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-slate-600">{f.head_name}</td>
+                                                    <td className="px-4 py-2.5 text-slate-600">{f.household_member}</td>
+
+                                                    {/* RELIEF */}
+                                                    <td className="px-4 py-2.5 text-slate-600">
+                                                        {f.resource_name ? (
+                                                            <div>
+                                                                <p>
+                                                                    {f.quantity}&nbsp;
+                                                                    <span className="text-xs text-slate-400">{f.resource_unit}</span>
+                                                                    &nbsp;{f.resource_name}
+                                                                </p>
+                                                                {f.additional_resource_name && (
+                                                                    <p className="text-xs text-purple-600">
+                                                                        +{f.additional_quantity ?? 0}&nbsp;
+                                                                        <span className="text-slate-400">{f.additional_resource_unit}</span>
+                                                                        &nbsp;{f.additional_resource_name}
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-slate-300">—</span>
+                                                        )}
+                                                    </td>
+
+                                                    {/* SCANNED BY */}
+                                                    <td className="px-4 py-2.5 text-slate-600">
+                                                        {f.scanned_by ?? <span className="text-slate-300">—</span>}
+                                                    </td>
+
+                                                    <td className="px-4 py-2.5">
+                                                        <span className={`badge ${getStatusClass(f.status)} capitalize`}>
+                                                            {f.status.replace('_', ' ')}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })()}
+            </div>
+
+            {/* ── SUMMARY — visible to both roles ── */}
+            <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">                <div className="card flex items-center gap-4">
                     <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                         <Users size={21} />
                     </div>
@@ -497,8 +769,7 @@ export default function DistributionPage({
                 </div>
             </div>
 
-            {/* FILTERS */}
-
+            {/* FILTERS — search visible to both; staff dropdown admin-only */}
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="relative w-full sm:max-w-sm">
                     <Search
@@ -515,26 +786,112 @@ export default function DistributionPage({
                     />
                 </div>
 
-                <select
-                    className="input-field sm:w-56"
-                    value={selectedStaffId}
-                    onChange={(e) => setSelectedStaffId(e.target.value)}
-                >
-                    <option value="">All Staff / Puroks</option>
+                {userRole === 'admin' && (
+                    <select
+                        className="input-field sm:w-56"
+                        value={selectedStaffId}
+                        onChange={(e) => setSelectedStaffId(e.target.value)}
+                    >
+                        <option value="">All Staff / Puroks</option>
 
-                    {staff.map((member) => (
-                        <option key={member.id} value={member.id}>
-                            {member.name}
-                            {member.purok_id
-                                ? ` — Purok ${member.purok_id}`
-                                : ''}
-                        </option>
-                    ))}
-                </select>
+                        {staff.map((member) => (
+                            <option key={member.id} value={member.id}>
+                                {member.name}
+                                {member.purok_id
+                                    ? ` — Purok ${member.purok_id}`
+                                    : ''}
+                            </option>
+                        ))}
+                    </select>
+                )}
             </div>
 
-            {/* DISTRIBUTION TABLE */}
+            {/* SCHEDULE FORM — admin only */}
+            {userRole === 'admin' && (
+            <form
+                onSubmit={saveSchedule}
+                className="card mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
+            >
+                <div>
+                    <h2 className="font-semibold text-slate-800">
+                        Distribution Schedule
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                        Set the date, location, and relief for all family distribution records.
+                    </p>
+                </div>
+                <div className="flex flex-wrap gap-2 sm:items-end">
+                    <div>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
+                            Date and time
+                        </label>
+                        <input
+                            type="datetime-local"
+                            className="input-field"
+                            value={scheduleValue}
+                            onChange={(e) =>
+                                setScheduleValue(e.target.value)
+                            }
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
+                            Location
+                        </label>
+                        <select
+                            className="input-field min-w-[170px]"
+                            value={scheduleLocationId}
+                            onChange={(e) =>
+                                setScheduleLocationId(e.target.value)
+                            }
+                        >
+                            <option value="">Select location</option>
+                            {locations.map((location) => (
+                                <option
+                                    key={location.id}
+                                    value={String(location.id)}
+                                >
+                                    {location.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
+                            Relief resource
+                        </label>
+                        <select
+                            className="input-field"
+                            value={scheduleResourceId}
+                            onChange={(e) =>
+                                setScheduleResourceId(e.target.value)
+                            }
+                            required
+                        >
+                            <option value="">Select relief resource</option>
+                            {resources.map((resource) => (
+                                <option
+                                    key={resource.id}
+                                    value={String(resource.id)}
+                                >
+                                    {resource.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <button
+                        type="submit"
+                        className="btn-primary"
+                        disabled={!scheduleResourceId}
+                    >
+                        Add Schedule
+                    </button>
+                </div>
+            </form>
+            )} {/* end admin-only schedule form */}
 
+            {/* DISTRIBUTION TABLE — visible to both admin and staff */}
             <div className="card overflow-x-auto p-0">
                 <div className="border-b border-slate-100 px-4 py-4">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -544,7 +901,15 @@ export default function DistributionPage({
                             </h2>
 
                             <p className="text-xs text-slate-400">
-                                {formatDate(currentDate)}
+                                {new Date(
+                                    scheduledAt || currentDate,
+                                ).toLocaleString('en-US', {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: 'numeric',
+                                    minute: '2-digit',
+                                })}
                             </p>
                         </div>
 
@@ -575,7 +940,7 @@ export default function DistributionPage({
 
                             <th className="px-4 py-3">Qty</th>
 
-                            <th className="px-4 py-3">Date</th>
+                            <th className="px-4 py-3">Scanned By</th>
 
                             <th className="px-4 py-3">Status</th>
 
@@ -673,10 +1038,10 @@ export default function DistributionPage({
                                     )}
                                 </td>
 
-                                {/* DATE */}
+                                {/* SCANNED BY */}
 
                                 <td className="px-4 py-3 text-slate-500">
-                                    {formatDate(row.date)}
+                                    {row.distribution.distributor?.name ?? <span className="text-slate-300">—</span>}
                                 </td>
 
                                 {/* STATUS */}
@@ -696,7 +1061,7 @@ export default function DistributionPage({
                                 <td className="px-4 py-3">
                                     <div className="flex justify-end gap-1.5">
                                         {/* QR */}
-
+                                        
                                         <button
                                             type="button"
                                             className="rounded-lg p-1.5 text-purple-500 hover:bg-purple-50"
@@ -711,33 +1076,37 @@ export default function DistributionPage({
                                         </button>
 
                                         {/* EDIT */}
-
-                                        <button
-                                            type="button"
-                                            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
-                                            onClick={() =>
-                                                openEditDistribution(
-                                                    row.distribution,
-                                                    row.family,
-                                                )
-                                            }
-                                            title="Edit Distribution"
-                                        >
-                                            <Pencil size={15} />
-                                        </button>
+                                        {userRole === 'admin' && (
+                                            <button
+                                                type="button"
+                                                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+                                                onClick={() =>
+                                                    openEditDistribution(
+                                                        row.distribution,
+                                                        row.family,
+                                                    )
+                                                }
+                                                title="Edit Distribution"
+                                            >
+                                                <Pencil size={15} />
+                                            </button>
+                                        )}
 
                                         {/* DELETE */}
-
-                                        <button
-                                            type="button"
-                                            className="rounded-lg p-1.5 text-red-500 hover:bg-red-50"
-                                            onClick={() =>
-                                                setDeleting(row.distribution)
-                                            }
-                                            title="Delete Distribution"
-                                        >
-                                            <Trash2 size={15} />
-                                        </button>
+                                        {userRole === 'admin' && (
+                                            <button
+                                                type="button"
+                                                className="rounded-lg p-1.5 text-red-500 hover:bg-red-50"
+                                                onClick={() =>
+                                                    setDeleting(
+                                                        row.distribution,
+                                                    )
+                                                }
+                                                title="Delete Distribution"
+                                            >
+                                                <Trash2 size={15} />
+                                            </button>
+                                        )}
                                     </div>
                                 </td>
                             </tr>
@@ -746,291 +1115,341 @@ export default function DistributionPage({
                 </table>
             </div>
 
-            {/* EDIT DISTRIBUTION MODAL */}
+            {/* EDIT DISTRIBUTION MODAL — admin only */}
+            {userRole === 'admin' && (
+            <>
+                <Modal
+                    open={!!editingFamily}
+                    onClose={() => {
+                        setEditingFamily(null);
+                        setEditingDistribution(null);
+                        form.reset();
+                        form.clearErrors();
+                    }}
+                    title={
+                        editingDistribution
+                            ? 'Edit Family Distribution'
+                            : 'Set Family Distribution'
+                    }
+                >
+                    <form onSubmit={submit} className="p-6">
+                        <p className="mt-1 text-sm text-slate-500">
+                            Edit the distribution details for{' '}
+                            {editingFamily?.family_name ?? 'family'}.
+                        </p>
 
-            <Modal
-                open={!!editingFamily}
-                onClose={() => {
-                    setEditingFamily(null);
-                    setEditingDistribution(null);
-                    form.reset();
-                    form.clearErrors();
-                }}
-                title={
-                    editingDistribution
-                        ? 'Edit Family Distribution'
-                        : 'Set Family Distribution'
-                }
-            >
-                <form onSubmit={submit} className="p-6">
-                    <p className="mt-1 text-sm text-slate-500">
-                        Edit the distribution details for{' '}
-                        {editingFamily?.family_name ?? 'family'}.
-                    </p>
+                        <div className="mt-5 space-y-4">
+                            {/* FAMILY */}
 
-                    <div className="mt-5 space-y-4">
-                        {/* FAMILY */}
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Family
+                                </label>
 
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">
-                                Family
-                            </label>
+                                <input
+                                    type="text"
+                                    className="input-field"
+                                    value={editingFamily?.family_name ?? ''}
+                                    disabled
+                                />
+                            </div>
 
-                            <input
-                                type="text"
-                                className="input-field"
-                                value={editingFamily?.family_name ?? ''}
-                                disabled
-                            />
-                        </div>
+                            {/* RELIEF */}
 
-                        {/* RELIEF */}
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Relief
+                                </label>
 
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">
-                                Relief
-                            </label>
+                                <select
+                                    className="input-field"
+                                    value={form.data.resource_id}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'resource_id',
+                                            e.target.value,
+                                        )
+                                    }
+                                >
+                                    <option value="">Select relief</option>
 
-                            <select
-                                className="input-field"
-                                value={form.data.resource_id}
-                                onChange={(e) =>
-                                    form.setData('resource_id', e.target.value)
-                                }
-                            >
-                                <option value="">Select relief</option>
+                                    {resources.map((resource) => (
+                                        <option
+                                            key={resource.id}
+                                            value={resource.id}
+                                        >
+                                            {resource.name}
+                                        </option>
+                                    ))}
+                                </select>
 
-                                {resources.map((resource) => (
-                                    <option
-                                        key={resource.id}
-                                        value={resource.id}
-                                    >
-                                        {resource.name}
+                                {form.errors.resource_id && (
+                                    <p className="mt-1 text-xs text-red-500">
+                                        {form.errors.resource_id}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* ADDITIONAL RESOURCE */}
+
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Additional Resource
+                                </label>
+
+                                <select
+                                    className="input-field"
+                                    value={form.data.additional_resource_id}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'additional_resource_id',
+                                            e.target.value,
+                                        )
+                                    }
+                                >
+                                    <option value="">None</option>
+
+                                    {resources.map((resource) => (
+                                        <option
+                                            key={resource.id}
+                                            value={resource.id}
+                                            disabled={
+                                                String(resource.id) ===
+                                                String(
+                                                    form.data.resource_id,
+                                                )
+                                            }
+                                        >
+                                            {resource.name}
+                                        </option>
+                                    ))}
+                                </select>
+
+                                {form.errors.additional_resource_id && (
+                                    <p className="mt-1 text-xs text-red-500">
+                                        {form.errors.additional_resource_id}
+                                    </p>
+                                )}
+                            </div>
+
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Additional Quantity
+                                </label>
+
+                                <input
+                                    type="number"
+                                    min="1"
+                                    className="input-field"
+                                    value={form.data.additional_quantity}
+                                    disabled={
+                                        !form.data.additional_resource_id
+                                    }
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'additional_quantity',
+                                            e.target.value,
+                                        )
+                                    }
+                                />
+
+                                {form.errors.additional_quantity && (
+                                    <p className="mt-1 text-xs text-red-500">
+                                        {form.errors.additional_quantity}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* QUANTITY */}
+
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Quantity
+                                </label>
+
+                                <input
+                                    type="number"
+                                    min="1"
+                                    className="input-field"
+                                    value={Math.max(
+                                        1,
+                                        Math.ceil(
+                                            Math.max(
+                                                1,
+                                                Number(
+                                                    editingFamily?.household_member ||
+                                                        1,
+                                                ),
+                                            ) / 3,
+                                        ),
+                                    )}
+                                    readOnly
+                                    aria-readonly="true"
+                                />
+                                <p className="mt-1 text-xs text-slate-500">
+                                    Automatically calculated from household
+                                    members (1 unit for every 1–3 members,
+                                    minimum 1).
+                                </p>
+
+                                {form.errors.quantity && (
+                                    <p className="mt-1 text-xs text-red-500">
+                                        {form.errors.quantity}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* LOCATION */}
+
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Relief Location
+                                </label>
+
+                                <select
+                                    className="input-field"
+                                    value={form.data.location_id}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'location_id',
+                                            e.target.value,
+                                        )
+                                    }
+                                >
+                                    <option value="">
+                                        Select location
                                     </option>
-                                ))}
-                            </select>
 
-                            {form.errors.resource_id && (
-                                <p className="mt-1 text-xs text-red-500">
-                                    {form.errors.resource_id}
-                                </p>
-                            )}
-                        </div>
+                                    {locations.map((location) => (
+                                        <option
+                                            key={location.id}
+                                            value={location.id}
+                                        >
+                                            {location.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
 
-                        {/* ADDITIONAL RESOURCE */}
+                            {/* DATE */}
 
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">
-                                Additional Resource
-                            </label>
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Distribution Date
+                                </label>
 
-                            <select
-                                className="input-field"
-                                value={form.data.additional_resource_id}
-                                onChange={(e) =>
-                                    form.setData(
-                                        'additional_resource_id',
-                                        e.target.value,
-                                    )
-                                }
-                            >
-                                <option value="">None</option>
+                                <input
+                                    type="datetime-local"
+                                    className="input-field"
+                                    value={form.data.distribution_date}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'distribution_date',
+                                            e.target.value,
+                                        )
+                                    }
+                                />
+                            </div>
 
-                                {resources.map((resource) => (
-                                    <option
-                                        key={resource.id}
-                                        value={resource.id}
-                                        disabled={
-                                            String(resource.id) ===
-                                            String(form.data.resource_id)
-                                        }
-                                    >
-                                        {resource.name}
+                            {/* STATUS */}
+
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Status
+                                </label>
+
+                                <select
+                                    className="input-field"
+                                    value={form.data.status}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'status',
+                                            e.target.value,
+                                        )
+                                    }
+                                >
+                                    <option value="pending">Pending</option>
+
+                                    <option value="in_transit">
+                                        In Transit
                                     </option>
-                                ))}
-                            </select>
 
-                            {form.errors.additional_resource_id && (
-                                <p className="mt-1 text-xs text-red-500">
-                                    {form.errors.additional_resource_id}
-                                </p>
-                            )}
-                        </div>
-
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">
-                                Additional Quantity
-                            </label>
-
-                            <input
-                                type="number"
-                                min="1"
-                                className="input-field"
-                                value={form.data.additional_quantity}
-                                disabled={!form.data.additional_resource_id}
-                                onChange={(e) =>
-                                    form.setData(
-                                        'additional_quantity',
-                                        e.target.value,
-                                    )
-                                }
-                            />
-
-                            {form.errors.additional_quantity && (
-                                <p className="mt-1 text-xs text-red-500">
-                                    {form.errors.additional_quantity}
-                                </p>
-                            )}
-                        </div>
-
-                        {/* QUANTITY */}
-
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">
-                                Quantity
-                            </label>
-
-                            <input
-                                type="number"
-                                min="1"
-                                className="input-field"
-                                value={form.data.quantity}
-                                onChange={(e) =>
-                                    form.setData(
-                                        'quantity',
-                                        Number(e.target.value),
-                                    )
-                                }
-                            />
-
-                            {form.errors.quantity && (
-                                <p className="mt-1 text-xs text-red-500">
-                                    {form.errors.quantity}
-                                </p>
-                            )}
-                        </div>
-
-                        {/* LOCATION */}
-
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">
-                                Relief Location
-                            </label>
-
-                            <select
-                                className="input-field"
-                                value={form.data.location_id}
-                                onChange={(e) =>
-                                    form.setData('location_id', e.target.value)
-                                }
-                            >
-                                <option value="">Select location</option>
-
-                                {locations.map((location) => (
-                                    <option
-                                        key={location.id}
-                                        value={location.id}
-                                    >
-                                        {location.name}
+                                    <option value="completed">
+                                        Completed
                                     </option>
-                                ))}
-                            </select>
+
+                                    <option value="cancelled">
+                                        Cancelled
+                                    </option>
+                                </select>
+                            </div>
+
+                            {/* NOTES */}
+
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Notes
+                                </label>
+
+                                <textarea
+                                    className="input-field min-h-20"
+                                    value={form.data.notes}
+                                    onChange={(e) =>
+                                        form.setData(
+                                            'notes',
+                                            e.target.value,
+                                        )
+                                    }
+                                    placeholder="Optional notes..."
+                                />
+                            </div>
                         </div>
 
-                        {/* DATE */}
+                        {/* BUTTONS */}
 
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">
-                                Distribution Date
-                            </label>
-
-                            <input
-                                type="date"
-                                className="input-field"
-                                value={form.data.distribution_date}
-                                onChange={(e) =>
-                                    form.setData(
-                                        'distribution_date',
-                                        e.target.value,
-                                    )
-                                }
-                            />
-                        </div>
-
-                        {/* STATUS */}
-
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">
-                                Status
-                            </label>
-
-                            <select
-                                className="input-field"
-                                value={form.data.status}
-                                onChange={(e) =>
-                                    form.setData('status', e.target.value)
-                                }
+                        <div className="mt-6 flex justify-end gap-2">
+                            <button
+                                type="button"
+                                className="btn-secondary"
+                                onClick={() => {
+                                    setEditingFamily(null);
+                                    setEditingDistribution(null);
+                                    form.reset();
+                                    form.clearErrors();
+                                }}
                             >
-                                <option value="pending">Pending</option>
+                                Cancel
+                            </button>
 
-                                <option value="in_transit">In Transit</option>
-
-                                <option value="completed">Completed</option>
-
-                                <option value="cancelled">Cancelled</option>
-                            </select>
+                            <button
+                                type="submit"
+                                className="btn-primary"
+                                disabled={form.processing}
+                            >
+                                {form.processing
+                                    ? 'Saving...'
+                                    : editingDistribution
+                                      ? 'Save Changes'
+                                      : 'Save'}
+                            </button>
                         </div>
+                    </form>
+                </Modal>
 
-                        {/* NOTES */}
+                {/* DELETE DISTRIBUTION */}
 
-                        <div>
-                            <label className="mb-1 block text-sm font-medium text-slate-700">
-                                Notes
-                            </label>
+                <ConfirmDialog
+                    open={!!deleting}
+                    onClose={() => setDeleting(null)}
+                    onConfirm={confirmDelete}
+                    message={`Delete distribution to "${
+                        deleting?.recipient_name ?? 'this family'
+                    }"? Completed distributions will restore stock.`}
+                />
+            </>
+            )} {/* end admin-only edit/delete */}
 
-                            <textarea
-                                className="input-field min-h-20"
-                                value={form.data.notes}
-                                onChange={(e) =>
-                                    form.setData('notes', e.target.value)
-                                }
-                                placeholder="Optional notes..."
-                            />
-                        </div>
-                    </div>
-
-                    {/* BUTTONS */}
-
-                    <div className="mt-6 flex justify-end gap-2">
-                        <button
-                            type="button"
-                            className="btn-secondary"
-                            onClick={() => {
-                                setEditingFamily(null);
-                                setEditingDistribution(null);
-                                form.reset();
-                                form.clearErrors();
-                            }}
-                        >
-                            Cancel
-                        </button>
-
-                        <button
-                            type="submit"
-                            className="btn-primary"
-                            disabled={form.processing}
-                        >
-                            {form.processing
-                                ? 'Saving...'
-                                : editingDistribution
-                                  ? 'Save Changes'
-                                  : 'Save'}
-                        </button>
-                    </div>
-                </form>
-            </Modal>
-
-            {/* QR MODAL */}
+            {/* QR MODAL — available to both admin and staff */}
 
             <Modal
                 open={!!qrDistribution}
@@ -1042,16 +1461,23 @@ export default function DistributionPage({
                         Scan this QR code using the Staff Scanner app.
                     </p>
 
-                    <div
-                        ref={qrRef}
-                        className="mt-5 flex justify-center rounded-xl bg-white p-5"
-                    >
-                        <QRCodeCanvas
-                            value={qrDistribution?.qr_code ?? ''}
-                            size={220}
-                            level="M"
-                        />
-                    </div>
+                    {qrDistribution?.qr_code ? (
+                        <div
+                            ref={qrRef}
+                            className="mt-5 flex justify-center rounded-xl bg-white p-5"
+                        >
+                            <QRCodeCanvas
+                                value={qrDistribution.qr_code}
+                                size={220}
+                                level="M"
+                            />
+                        </div>
+                    ) : (
+                        <div className="mt-5 flex flex-col items-center gap-2 rounded-xl bg-slate-50 p-8 text-slate-400">
+                            <QrCode size={48} strokeWidth={1} />
+                            <p className="text-sm">QR code not available for this distribution.</p>
+                        </div>
+                    )}
 
                     <div className="mt-4">
                         <p className="text-sm font-medium text-slate-700">
@@ -1083,17 +1509,6 @@ export default function DistributionPage({
                     </div>
                 </div>
             </Modal>
-
-            {/* DELETE DISTRIBUTION */}
-
-            <ConfirmDialog
-                open={!!deleting}
-                onClose={() => setDeleting(null)}
-                onConfirm={confirmDelete}
-                message={`Delete distribution to "${
-                    deleting?.recipient_name ?? 'this family'
-                }"? Completed distributions will restore stock.`}
-            />
         </AppLayout>
     );
 }

@@ -25,6 +25,7 @@ class Distribution extends Model
         'status',
         'notes',
         'family_id',
+        'schedule_id',
     ];
 
     protected function casts(): array

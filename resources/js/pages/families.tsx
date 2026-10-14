@@ -82,11 +82,13 @@ export default function Families({
     puroks,
     locations = [],
     staff = [],
+    userRole,
 }: {
     families: Family[];
     puroks: Purok[];
     locations: Location[];
     staff: Staff[];
+    userRole: string;
 }) {
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState<Family | null>(null);
@@ -140,7 +142,7 @@ export default function Families({
 
         form.setData({
             ...emptyForm,
-            family_id: `FAM-${String(families.length + 1).padStart(4, '0')}`,
+            family_id: '',
         });
 
         setShowForm(true);
@@ -217,7 +219,7 @@ export default function Families({
                             value={selectedStaffId}
                             onChange={(e) => setSelectedStaffId(e.target.value)}
                         >
-                            <option value="">All Staff</option>
+                            {userRole === 'admin' && <option value="">All Staff</option>}
 
                             {staff.map((member) => (
                                 <option key={member.id} value={member.id}>
@@ -343,7 +345,7 @@ export default function Families({
 
                                 <td className="px-4 py-3">
                                     <div className="flex justify-end gap-1.5">
-                                        <button
+                                        {userRole === 'admin' && <><button
                                             className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
                                             onClick={() => openEdit(family)}
                                             title="Edit family"
@@ -357,7 +359,7 @@ export default function Families({
                                             title="Delete family"
                                         >
                                             <Trash2 size={15} />
-                                        </button>
+                                        </button></>}
                                     </div>
                                 </td>
                             </tr>
@@ -375,26 +377,6 @@ export default function Families({
             >
                 <form onSubmit={submit} className="space-y-4">
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        {/* Family ID */}
-                        <div>
-                            <label className="label">Family ID</label>
-
-                            <input
-                                className="input-field"
-                                value={form.data.family_id}
-                                onChange={(e) =>
-                                    form.setData('family_id', e.target.value)
-                                }
-                                placeholder="FAM-0001"
-                            />
-
-                            {form.errors.family_id && (
-                                <p className="mt-1 text-xs text-red-600">
-                                    {form.errors.family_id}
-                                </p>
-                            )}
-                        </div>
-
                         {/* Family Name */}
                         <div>
                             <label className="label">Family Name</label>

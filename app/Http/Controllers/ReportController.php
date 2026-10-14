@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Distribution;
+use App\Models\Family;
 use App\Models\Location;
 use App\Models\QrScan;
 use App\Models\Resource;
@@ -14,47 +15,54 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
 {
-    public function index(): Response
+    public function index(Request $request): Response
     {
-        $resourcesByCategory = Resource::query()
+        $user = $request->user();
+        $admin = $user->role === 'admin';
+        $resourceBase = Resource::query()->when(!$admin, fn ($q) => $q->where('location_id', $user->location_id));
+        $distributionBase = Distribution::query()->when(!$admin, fn ($q) => $q->where('distributed_by', $user->id));
+        $scanBase = QrScan::query()->when(!$admin, fn ($q) => $q->where('scanned_by', $user->id));
+        $resourcesByCategory = (clone $resourceBase)
             ->select('category', DB::raw('count(*) as total'), DB::raw('sum(quantity) as quantity'))
             ->groupBy('category')
             ->get();
 
-        $distributionsByMonth = Distribution::query()
+        $distributionsByMonth = (clone $distributionBase)
             ->select(DB::raw("DATE_FORMAT(distribution_date, '%Y-%m') as month"), DB::raw('sum(quantity) as total_quantity'), DB::raw('sum(household_member) as household_member'))
             ->where('status', 'completed')
             ->groupBy('month')
             ->orderBy('month')
             ->get();
 
-        $resourcesByLocation = Location::query()
+        $resourcesByLocation = Location::query()->when(!$admin, fn ($q) => $user->location_id ? $q->whereKey($user->location_id) : $q->whereRaw('1 = 0'))
             ->withCount('resources')
             ->withSum('resources', 'quantity')
             ->get(['id', 'name', 'city']);
 
-        $lowStock = Resource::query()
+        $lowStock = (clone $resourceBase)
             ->whereColumn('quantity', '<=', 'minimum_threshold')
             ->with('location:id,name')
             ->orderBy('quantity')
             ->get();
 
-        $scansByType = QrScan::query()
+        $scansByType = (clone $scanBase)
             ->select('scan_type', DB::raw('count(*) as total'))
             ->groupBy('scan_type')
             ->get();
 
         $summary = [
-            'total_resources' => (int) Resource::sum('quantity'),
+            'total_resources' => (clone $resourceBase)->count(),
+            'total_families' => $admin ? Family::count() : Family::where('purok_id', $user->purok_id)->count(),
             'total_locations' => Location::count(),
-            'total_distributions' => Distribution::where('status', 'completed')->count(),
-            'total_household_member' => (int) Distribution::where('status', 'completed')->sum('household_member'),
+            'total_distributions' => (clone $distributionBase)->where('status', 'completed')->count(),
+            'total_household_member' => (int) (clone $distributionBase)->where('status', 'completed')->sum('household_member'),
             'low_stock_count' => $lowStock->count(),
-            'total_scans' => QrScan::count(),
+            'total_scans' => (clone $scanBase)->count(),
         ];
 
         return Inertia::render('reports', [
             'summary' => $summary,
+            'userRole' => $user->role,
             'resourcesByCategory' => $resourcesByCategory,
             'distributionsByMonth' => $distributionsByMonth,
             'resourcesByLocation' => $resourcesByLocation,
@@ -63,9 +71,42 @@ class ReportController extends Controller
         ]);
     }
 
-    public function exportInventory(): StreamedResponse
+    public function exportFamilies(Request $request): StreamedResponse
     {
-        $resources = Resource::with('location:id,name')->orderBy('name')->get();
+        $user = $request->user();
+
+        $families = Family::query()
+            ->with(['purok:id,name', 'location:id,name'])
+            ->when(
+                $user->role === 'staff',
+                fn ($query) => $user->purok_id
+                    ? $query->where('purok_id', $user->purok_id)
+                    : $query->whereRaw('1 = 0')
+            )
+            ->orderBy('family_name')
+            ->get();
+
+        return $this->csvResponse(
+            'families-report.csv',
+            ['Family ID', 'Family Name', 'Head of Family', 'Phone', 'Household Members', 'Address', 'Purok', 'Location', 'Status'],
+            $families->map(fn ($family) => [
+                $family->family_id,
+                $family->family_name,
+                $family->head_name,
+                $family->phone,
+                $family->household_member,
+                $family->address,
+                $family->purok?->name,
+                $family->location?->name,
+                $family->status,
+            ])
+        );
+    }
+
+    public function exportInventory(Request $request): StreamedResponse
+    {
+        $user = $request->user();
+        $resources = Resource::when($user->role !== 'admin', fn ($q) => $q->where('location_id', $user->location_id))->with('location:id,name')->orderBy('name')->get();
 
         return $this->csvResponse('inventory-report.csv', ['Name', 'SKU', 'QR Code', 'Category', 'Quantity', 'Unit', 'Min Threshold', 'Status', 'Location', 'Expiry Date'], $resources->map(fn ($r) => [
             $r->name, $r->sku, $r->qr_code, $r->category, $r->quantity, $r->unit, $r->minimum_threshold, $r->status, $r->location?->name, $r->expiry_date,
@@ -74,7 +115,8 @@ class ReportController extends Controller
 
     public function exportDistributions(Request $request): StreamedResponse
     {
-        $distributions = Distribution::with(['resource:id,name,unit', 'location:id,name', 'distributor:id,name'])
+        $user = $request->user();
+        $distributions = Distribution::when($user->role !== 'admin', fn ($q) => $q->where('distributed_by', $user->id))->with(['resource:id,name,unit', 'location:id,name', 'distributor:id,name'])
             ->orderByDesc('distribution_date')
             ->get();
 
@@ -83,9 +125,10 @@ class ReportController extends Controller
         ]));
     }
 
-    public function exportQrScans(): StreamedResponse
+    public function exportQrScans(Request $request): StreamedResponse
     {
-        $scans = QrScan::with(['resource:id,name', 'location:id,name', 'scanner:id,name'])
+        $user = $request->user();
+        $scans = QrScan::when($user->role !== 'admin', fn ($q) => $q->where('scanned_by', $user->id))->with(['resource:id,name', 'location:id,name', 'scanner:id,name'])
             ->orderByDesc('scanned_at')
             ->get();
 

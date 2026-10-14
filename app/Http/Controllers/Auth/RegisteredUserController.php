@@ -9,6 +9,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -21,28 +22,29 @@ class RegisteredUserController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $data = $request->validate([
+        $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|email|max:255|unique:users,email',
-            'phone' => 'nullable|string|max:50',
-            'password' => 'required|string|min:8|confirmed',
+            'email' => 'required|string|lowercase|email|max:255|unique:users,email',
+            'password' => ['required', 'confirmed', Rules\Password::defaults()],
         ]);
 
-        $isFirstUser = User::count() === 0;
-
         $user = User::create([
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'phone' => $data['phone'] ?? null,
-            'password' => Hash::make($data['password']),
-            'role' => $isFirstUser ? 'admin' : 'staff',
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+            'role' => 'staff',
             'status' => 'active',
         ]);
 
         event(new Registered($user));
 
-        Auth::login($user);
+        Auth::logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
 
-        return redirect()->route('dashboard');
+        return redirect()->route('login')->with(
+            'status',
+            'Your account has been created. Please log in.'
+        );
     }
 }

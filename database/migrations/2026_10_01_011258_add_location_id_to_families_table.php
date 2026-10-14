@@ -8,20 +8,16 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('families', function (Blueprint $table) {
-            $table->foreignId('location_id')
-                ->nullable()
-                ->after('purok_id')
-                ->constrained('locations')
-                ->nullOnDelete();
-        });
+        if (!Schema::hasColumn('families', 'location_id')) {
+            Schema::table('families', function (Blueprint $table) {
+                $table->foreignId('location_id')->nullable()->after('purok_id')->constrained('locations')->nullOnDelete();
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('families', function (Blueprint $table) {
-            $table->dropForeign(['location_id']);
-            $table->dropColumn('location_id');
-        });
+        // Keep the column in place because an earlier migration may own it.
+
     }
 };

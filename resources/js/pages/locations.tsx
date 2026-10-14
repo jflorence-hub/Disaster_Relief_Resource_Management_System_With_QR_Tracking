@@ -24,20 +24,11 @@ interface FormData {
     type: string;
     address: string;
     city: string;
-    latitude: string;
-    longitude: string;
-
-    // Kept temporarily because the backend still expects capacity.
-    // It is no longer displayed or manually edited.
     capacity: number | string;
-
     contact_person: string;
     contact_phone: string;
+    email: string;
     status: string;
-}
-
-interface LocationWithFamilies extends Location {
-    families_count?: number;
 }
 
 const emptyForm: FormData = {
@@ -45,18 +36,22 @@ const emptyForm: FormData = {
     type: 'warehouse',
     address: '',
     city: '',
-    latitude: '',
-    longitude: '',
     capacity: 0,
     contact_person: '',
     contact_phone: '',
+    email: '',
     status: 'active',
 };
 
+interface LocationWithFamilies extends Location {
+    families_count?: number;
+}
+
 export default function Locations({
-    locations,
+    locations, userRole,
 }: {
     locations: LocationWithFamilies[];
+    userRole: string;
 }) {
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] =
@@ -78,29 +73,17 @@ export default function Locations({
 
     const openEdit = (location: LocationWithFamilies) => {
         setEditing(location);
-
         form.setData({
             name: location.name,
             type: location.type,
             address: location.address,
             city: location.city,
-            latitude: location.latitude
-                ? String(location.latitude)
-                : '',
-            longitude: location.longitude
-                ? String(location.longitude)
-                : '',
-
-            // Kept only for backend compatibility.
             capacity: location.capacity ?? 0,
-
-            contact_person:
-                location.contact_person ?? '',
-            contact_phone:
-                location.contact_phone ?? '',
+            contact_person: location.contact_person ?? '',
+            contact_phone: location.contact_phone ?? '',
+            email: location.email ?? '',
             status: location.status,
         });
-
         setShowForm(true);
     };
 
@@ -133,7 +116,7 @@ export default function Locations({
         >
             <Head title="Locations" />
 
-            <div className="mb-4 flex justify-end">
+            {userRole === 'admin' && <div className="mb-4 flex justify-end">
                 <button
                     className="btn-primary flex items-center gap-2"
                     onClick={openCreate}
@@ -141,7 +124,7 @@ export default function Locations({
                     <Plus size={16} />
                     Add Location
                 </button>
-            </div>
+            </div>}
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {locations.length === 0 && (
@@ -239,15 +222,18 @@ export default function Locations({
                         </div>
 
                         {/* Contact */}
-                        {l.contact_person && (
-                            <p className="mt-2 text-xs text-slate-400">
-                                {l.contact_person} ·{' '}
-                                {l.contact_phone}
-                            </p>
+                        {(l.contact_person || l.contact_phone || l.email) && (
+                            <div className="mt-2 text-xs text-slate-400 space-y-0.5">
+                                {l.contact_person && (
+                                    <p><span className="font-medium text-slate-500">Barangay Captain:</span> {l.contact_person}</p>
+                                )}
+                                {l.contact_phone && <p>{l.contact_phone}</p>}
+                                {l.email && <p>{l.email}</p>}
+                            </div>
                         )}
 
                         {/* Actions */}
-                        <div className="mt-4 flex justify-end gap-1.5 border-t border-slate-100 pt-3">
+                        {userRole === 'admin' && <div className="mt-4 flex justify-end gap-1.5 border-t border-slate-100 pt-3">
                             <button
                                 className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
                                 onClick={() => openEdit(l)}
@@ -261,13 +247,13 @@ export default function Locations({
                             >
                                 <Trash2 size={15} />
                             </button>
-                        </div>
+                        </div>}
                     </div>
                 ))}
             </div>
 
             {/* Add / Edit Location Modal */}
-            <Modal
+            {userRole === 'admin' && <Modal
                 open={showForm}
                 onClose={() => setShowForm(false)}
                 title={
@@ -368,10 +354,7 @@ export default function Locations({
                                 className="input-field"
                                 value={form.data.city}
                                 onChange={(e) =>
-                                    form.setData(
-                                        'city',
-                                        e.target.value,
-                                    )
+                                    form.setData('city', e.target.value)
                                 }
                             />
 
@@ -382,56 +365,18 @@ export default function Locations({
                             )}
                         </div>
 
-                        {/* LATITUDE */}
+                        {/* BARANGAY CAPTAIN */}
                         <div>
                             <label className="label">
-                                Latitude (optional)
+                                Barangay Captain
                             </label>
 
                             <input
                                 className="input-field"
-                                value={form.data.latitude}
-                                onChange={(e) =>
-                                    form.setData(
-                                        'latitude',
-                                        e.target.value,
-                                    )
-                                }
-                            />
-                        </div>
-
-                        {/* LONGITUDE */}
-                        <div>
-                            <label className="label">
-                                Longitude (optional)
-                            </label>
-
-                            <input
-                                className="input-field"
-                                value={form.data.longitude}
-                                onChange={(e) =>
-                                    form.setData(
-                                        'longitude',
-                                        e.target.value,
-                                    )
-                                }
-                            />
-                        </div>
-
-                        {/* CONTACT PERSON */}
-                        <div>
-                            <label className="label">
-                                Contact person
-                            </label>
-
-                            <input
-                                className="input-field"
+                                placeholder="Full name"
                                 value={form.data.contact_person}
                                 onChange={(e) =>
-                                    form.setData(
-                                        'contact_person',
-                                        e.target.value,
-                                    )
+                                    form.setData('contact_person', e.target.value)
                                 }
                             />
                         </div>
@@ -446,12 +391,31 @@ export default function Locations({
                                 className="input-field"
                                 value={form.data.contact_phone}
                                 onChange={(e) =>
-                                    form.setData(
-                                        'contact_phone',
-                                        e.target.value,
-                                    )
+                                    form.setData('contact_phone', e.target.value)
                                 }
                             />
+                        </div>
+
+                        {/* EMAIL */}
+                        <div>
+                            <label className="label">
+                                Email (optional)
+                            </label>
+
+                            <input
+                                type="email"
+                                className="input-field"
+                                value={form.data.email}
+                                onChange={(e) =>
+                                    form.setData('email', e.target.value)
+                                }
+                            />
+
+                            {form.errors.email && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.email}
+                                </p>
+                            )}
                         </div>
 
                         {/* STATUS */}
@@ -510,15 +474,15 @@ export default function Locations({
                         </button>
                     </div>
                 </form>
-            </Modal>
+            </Modal>}
 
             {/* DELETE CONFIRMATION */}
-            <ConfirmDialog
+            {userRole === 'admin' && <ConfirmDialog
                 open={!!deleting}
                 onClose={() => setDeleting(null)}
                 onConfirm={confirmDelete}
                 message={`Delete "${deleting?.name}"? Resources assigned here will become unassigned.`}
-            />
+            />}
         </AppLayout>
     );
 }

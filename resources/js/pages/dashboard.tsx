@@ -6,6 +6,8 @@ import { useEffect } from 'react';
 
 interface Stats {
     total_resources: number;
+    total_families: number;
+    total_resource_quantity: number;
     total_locations: number;
     low_stock_count: number;
     pending_distributions: number;
@@ -20,11 +22,15 @@ export default function Dashboard({
     recentDistributions,
     recentScans,
     lowStockResources,
+    userRole,
+    staffContext,
 }: {
     stats: Stats;
     recentDistributions: Distribution[];
     recentScans: QrScan[];
     lowStockResources: (ResourceItem & { location?: Location })[];
+    userRole: string;
+    staffContext?: { location: string | null; hasPurok: boolean; purok: string | null } | null;
 }) {
     // Poll so stats/scans/low-stock reflect scans recorded from the mobile app.
     useEffect(() => {
@@ -37,24 +43,29 @@ export default function Dashboard({
 
     const cards = [
         { label: 'Total Resources', value: stats.total_resources.toLocaleString(), icon: Package, color: 'bg-blue-50 text-blue-600' },
-        { label: 'Locations', value: stats.total_locations, icon: MapPin, color: 'bg-purple-50 text-purple-600' },
+        { label: 'Total Stock Quantity', value: (stats.total_resource_quantity ?? 0).toLocaleString(), icon: Package, color: 'bg-indigo-50 text-indigo-600' },
+        ...(userRole === 'admin' ? [{ label: 'Registered Families', value: stats.total_families ?? 0, icon: Users, color: 'bg-cyan-50 text-cyan-600' }] : []),
+        ...(userRole === 'admin' ? [{ label: 'Locations', value: stats.total_locations, icon: MapPin, color: 'bg-purple-50 text-purple-600' }] : []),
         { label: 'Low Stock Items', value: stats.low_stock_count, icon: AlertTriangle, color: 'bg-amber-50 text-amber-600' },
         { label: 'Pending / In Transit', value: stats.pending_distributions, icon: Truck, color: 'bg-slate-100 text-slate-600' },
         { label: 'Completed Distributions', value: stats.completed_distributions, icon: CheckCircle2, color: 'bg-emerald-50 text-emerald-600' },
         { label: 'Household Member Served', value: stats.household_member_served.toLocaleString(), icon: Users, color: 'bg-blue-50 text-blue-600' },
         { label: 'QR Scans Logged', value: stats.total_scans.toLocaleString(), icon: QrCode, color: 'bg-purple-50 text-purple-600' },
-        { label: 'Active Team Members', value: stats.active_team_members, icon: Users, color: 'bg-emerald-50 text-emerald-600' },
+        ...(userRole === 'admin' ? [{ label: 'Active Team Members', value: stats.active_team_members, icon: Users, color: 'bg-emerald-50 text-emerald-600' }] : []),
     ];
 
     const quickActions = [
-        { href: '/resources', label: 'Add Resource', icon: Plus },
+        ...(userRole === 'admin' ? [{ href: '/resources', label: 'Add Resource', icon: Plus }] : []),
         { href: '/qr-tracking', label: 'Scan QR Code', icon: ScanLine },
         { href: '/reports', label: 'Generate Report', icon: Package },
+        { href: '/messages', label: 'Message Admin', icon: Users },
     ];
 
     return (
         <AppLayout title="Dashboard" subtitle="Overview of relief operations">
             <Head title="Dashboard" />
+
+            {staffContext && <div className="card mb-6"><h2 className="text-lg font-semibold text-slate-800">My Assignment</h2><p className="mt-3 text-sm text-slate-500">Assigned Location</p><p className="font-medium text-slate-800">{staffContext.location ?? 'Not assigned'}</p><p className="mt-3 text-sm text-slate-500">Assigned Purok</p><p className="font-medium text-slate-800">{staffContext.hasPurok ? staffContext.purok ?? '' : 'Not assigned'}</p></div>}
 
             <div className="mb-6 flex flex-wrap gap-3">
                 {quickActions.map((a) => (

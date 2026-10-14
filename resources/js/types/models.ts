@@ -19,6 +19,7 @@ export interface Location {
     capacity: number;
     contact_person: string | null;
     contact_phone: string | null;
+    email: string | null;
     status: 'active' | 'inactive' | 'maintenance';
     resources_count?: number;
     resources_sum_quantity?: number | null;
@@ -48,6 +49,7 @@ export interface ResourceItem {
     location_id: number | null;
     location?: { id: number; name: string; city?: string } | null;
     notes: string | null;
+    disaster: string | null;
     status: 'in_stock' | 'low_stock' | 'out_of_stock';
 }
 

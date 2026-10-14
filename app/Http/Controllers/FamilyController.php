@@ -28,11 +28,9 @@ class FamilyController extends Controller
             ])
             ->when(
                 $user->role === 'staff',
-                fn($query) =>
-                    $query->where(
-                        'purok_id',
-                        $user->purok_id
-                    )
+                fn($query) => $user->purok_id
+                    ? $query->where('purok_id', $user->purok_id)
+                    : $query->whereRaw('1 = 0')
             )
             ->when(
                 $request->string('search')->toString(),
@@ -88,7 +86,7 @@ class FamilyController extends Controller
 
         $staff = User::query()
             ->where('role', 'staff')
-            ->whereNotNull('purok_id')
+            ->when($user->role === 'staff', fn ($q) => $q->whereKey($user->id))
             ->orderBy('name')
             ->get([
                 'id',
@@ -98,6 +96,7 @@ class FamilyController extends Controller
 
         return Inertia::render('families', [
             'families' => $families,
+            'userRole' => $user->role,
             'puroks' => $puroks,
             'locations' => $locations,
             'staff' => $staff,
@@ -112,12 +111,7 @@ class FamilyController extends Controller
         $user = $request->user();
 
         $data = $request->validate([
-            'family_id' => [
-                'required',
-                'string',
-                'max:50',
-                'unique:families,family_id',
-            ],
+            // family_id is generated server-side from the database primary key.
 
             'family_name' => [
                 'required',
@@ -201,6 +195,7 @@ class FamilyController extends Controller
         }
 
         DB::transaction(function () use ($data, $user) {
+            $data['family_id'] = 'FAM-PENDING-' . bin2hex(random_bytes(8));
             /*
              * Hash PIN.
              */
@@ -214,77 +209,37 @@ class FamilyController extends Controller
              * saved with the family.
              */
             $family = Family::create($data);
+            $family->update(['family_id' => 'FAM-' . str_pad((string) $family->id, 6, '0', STR_PAD_LEFT)]);
 
             /*
              * Create beneficiaries.
              */
             $this->syncHousehold_member($family);
 
-            /*
-             * Find default resource.
-             */
-            $defaultResource =
-                Resource::query()
-                    ->where(
-                        'name',
-                        'Set of Goods and Needs'
-                    )
-                    ->first();
-
-            if (!$defaultResource) {
-                throw new \RuntimeException(
-                    'The resource "Set of Goods and Needs" was not found. Please create this resource first.'
-                );
-            }
-
-            /*
-             * Create REAL distribution record.
-             */
-            Distribution::create([
-                'family_id' =>
-                    $family->id,
-
-                'resource_id' =>
-                    $defaultResource->id,
-
-                'quantity' => 1,
-
-                'additional_resource_id' =>
-                    null,
-
-                'additional_quantity' =>
-                    null,
-
-                /*
-                 * Use the family's location.
-                 */
-                'location_id' =>
-                    $family->location_id,
-
-                'distributed_by' =>
-                    $user->id,
-
-                'recipient_name' =>
-                    $family->family_name,
-
-                'recipient_contact' =>
-                    $family->phone,
-
-                'household_member' =>
-                    $family->household_member,
-
-                'distribution_date' =>
-                    now(),
-
-                'status' => 'pending',
-
-                'notes' => null,
-            ]);
+            // Initial relief is intentionally unassigned until an administrator creates a schedule.
+            $scheduledAt = DB::table('distribution_schedules')->orderByDesc('id')->value('scheduled_at') ?? now();
+            Distribution::firstOrCreate(
+                ['family_id' => $family->id, 'schedule_id' => null],
+                [
+                    'resource_id' => null,
+                    'quantity' => max(1, (int) ceil(max(1, (int) $family->household_member) / 3)),
+                    'additional_resource_id' => null,
+                    'additional_quantity' => null,
+                    'location_id' => $family->location_id,
+                    'distribution_date' => $scheduledAt,
+                    'recipient_name' => $family->family_name,
+                    'recipient_contact' => $family->phone,
+                    'household_member' => $family->household_member,
+                    'distributed_by' => $user->id,
+                    'status' => 'pending',
+                    'notes' => null,
+                ]
+            );
         });
 
         return back()->with(
             'success',
-            'Family added successfully and initial distribution created.'
+            'Family added successfully.'
         );
     }
 
@@ -322,6 +277,7 @@ class FamilyController extends Controller
         Request $request,
         Family $family
     ): RedirectResponse {
+        abort_unless($request->user()->role === 'admin', 403, 'Only administrators can edit families.');
         $user = $request->user();
 
         if (
@@ -459,6 +415,7 @@ class FamilyController extends Controller
 
                         'household_member' =>
                             $family->household_member,
+                        'quantity' => max(1, (int) ceil(max(1, (int) $family->household_member) / 3)),
                     ]);
         });
 
@@ -475,6 +432,7 @@ class FamilyController extends Controller
         Request $request,
         Family $family
     ): RedirectResponse {
+        abort_unless($request->user()->role === 'admin', 403, 'Only administrators can delete families.');
         $user = $request->user();
 
         if (

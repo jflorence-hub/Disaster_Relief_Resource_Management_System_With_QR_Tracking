@@ -20,6 +20,7 @@ class Location extends Model
         'capacity',
         'contact_person',
         'contact_phone',
+        'email',
         'status',
     ];
 

@@ -14,7 +14,7 @@ class Resource extends Model
 
     protected $fillable = [
         'name', 'category', 'sku', 'qr_code', 'quantity', 'unit',
-        'minimum_threshold', 'expiry_date', 'location_id', 'notes',
+        'minimum_threshold', 'expiry_date', 'location_id', 'notes', 'disaster',
     ];
 
     protected $appends = ['status'];

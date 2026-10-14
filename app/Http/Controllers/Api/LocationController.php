@@ -8,6 +8,14 @@ use Illuminate\Http\JsonResponse;
 
 class LocationController extends Controller
 {
+    public function registrationOptions(): JsonResponse
+    {
+        return response()->json([
+            'puroks' => \App\Models\Purok::query()->where('status', 'active')->orderBy('name')->get(['id', 'name', 'code']),
+            'locations' => Location::query()->where('status', 'active')->orderBy('name')->get(['id', 'name', 'type', 'city', 'status']),
+        ]);
+    }
+
     public function index(): JsonResponse
     {
         return response()->json([

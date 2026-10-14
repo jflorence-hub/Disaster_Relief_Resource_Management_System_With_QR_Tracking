@@ -4,6 +4,7 @@ import { AlertTriangle, Download, MapPin, Package, QrCode, Truck, Users } from '
 
 interface Summary {
     total_resources: number;
+    total_families: number;
     total_locations: number;
     total_distributions: number;
     total_household_member: number;
@@ -63,7 +64,8 @@ export default function Reports({
     const maxCategoryQty = Math.max(1, ...resourcesByCategory.map((c) => c.quantity));
 
     const cards = [
-        { label: 'Total Resource Units', value: summary.total_resources.toLocaleString(), icon: Package, color: 'bg-blue-50 text-blue-600' },
+        { label: 'Total Resource Records', value: summary.total_resources.toLocaleString(), icon: Package, color: 'bg-blue-50 text-blue-600' },
+        { label: 'Registered Families', value: (summary.total_families ?? 0).toLocaleString(), icon: Users, color: 'bg-cyan-50 text-cyan-600' },
         { label: 'Locations', value: summary.total_locations, icon: MapPin, color: 'bg-purple-50 text-purple-600' },
         { label: 'Completed Distributions', value: summary.total_distributions, icon: Truck, color: 'bg-emerald-50 text-emerald-600' },
         { label: 'Household Member Served', value: summary.total_household_member.toLocaleString(), icon: Users, color: 'bg-blue-50 text-blue-600' },
@@ -72,6 +74,7 @@ export default function Reports({
     ];
 
     const exports = [
+        { href: '/reports/export/families', label: 'Families Report' },
         { href: '/reports/export/inventory', label: 'Inventory Report' },
         { href: '/reports/export/distributions', label: 'Distribution Report' },
         { href: '/reports/export/qr-scans', label: 'QR Tracking Report' },
@@ -89,7 +92,7 @@ export default function Reports({
                 ))}
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
                 {cards.map((c) => (
                     <div key={c.label} className="stat-card flex items-center gap-3">
                         <div className={`stat-icon ${c.color}`}>

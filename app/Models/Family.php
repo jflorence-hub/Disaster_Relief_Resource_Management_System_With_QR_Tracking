@@ -16,6 +16,7 @@ class Family extends Authenticatable
         'family_name',
         'head_name',
         'phone',
+        'email',
         'household_member',
         'address',
         'purok_id',

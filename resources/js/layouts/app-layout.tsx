@@ -1,11 +1,11 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import {
-    Bell,
     FileText,
     House,
     LayoutDashboard,
     LogOut,
     MapPin,
+    MessageCircle,
     Menu,
     Package,
     QrCode,
@@ -24,6 +24,7 @@ const navItems = [
     { href: '/distribution', label: 'Distribution', icon: Truck, adminOnly: false },
     { href: '/locations', label: 'Locations', icon: MapPin, adminOnly: false },
     { href: '/reports', label: 'Reports', icon: FileText, adminOnly: false },
+    { href: '/messages', label: 'Messages', icon: MessageCircle, adminOnly: false },
     { href: '/team', label: 'Team Management', icon: Users, adminOnly: true },
     { href: '/families', label: 'Families', icon: House, adminOnly: false },
     { href: '/settings', label: 'Settings', icon: Settings, adminOnly: true },
@@ -116,9 +117,7 @@ export default function AppLayout({
                         {subtitle && <p className="text-xs text-slate-500">{subtitle}</p>}
                     </div>
                     <div className="flex items-center gap-4">
-                        <button className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100">
-                            <Bell size={20} />
-                        </button>
+                        <Link href="/messages" aria-label="Messages" title="Messages" className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100"><MessageCircle size={20} /></Link>
                         <div className="flex items-center gap-2.5 border-l border-slate-200 pl-4">
                             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700">
                                 {user?.name?.charAt(0)?.toUpperCase() ?? '?'}

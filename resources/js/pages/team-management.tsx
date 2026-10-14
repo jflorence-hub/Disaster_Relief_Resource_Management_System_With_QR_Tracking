@@ -4,7 +4,7 @@ import AppLayout from '@/layouts/app-layout';
 import { Location, TeamMember } from '@/types/models';
 import { Head, router, useForm } from '@inertiajs/react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { FormEventHandler, useState } from 'react';
+import { FormEventHandler, useMemo, useState } from 'react';
 
 const roles = ['admin', 'staff'];
 const statuses = ['active', 'on_leave', 'inactive'];
@@ -56,8 +56,18 @@ export default function TeamManagement({
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState<TeamMember | null>(null);
     const [deleting, setDeleting] = useState<TeamMember | null>(null);
+    const [filterLocation, setFilterLocation] = useState<string>('');
 
     const form = useForm<FormData>(emptyForm);
+
+    // Filter + sort by purok_id ascending when a location is selected
+    const visibleMembers = useMemo(() => {
+        if (!filterLocation) return members;
+        return members
+            .filter((m) => m.location_id !== null && String(m.location_id) === filterLocation)
+            .slice()
+            .sort((a, b) => (a.purok_id ?? 0) - (b.purok_id ?? 0));
+    }, [members, filterLocation]);
 
     const openCreate = () => {
         setEditing(null);
@@ -106,7 +116,17 @@ export default function TeamManagement({
         >
             <Head title="Team Management" />
 
-            <div className="mb-4 flex justify-end">
+            <div className="mb-4 flex items-center justify-between gap-3">
+                <select
+                    className="input-field w-64"
+                    value={filterLocation}
+                    onChange={(e) => setFilterLocation(e.target.value)}
+                >
+                    <option value="">All Locations</option>
+                    {locations.map((l) => (
+                        <option key={l.id} value={String(l.id)}>{l.name}</option>
+                    ))}
+                </select>
                 <button
                     className="btn-primary flex items-center gap-2"
                     onClick={openCreate}
@@ -129,17 +149,17 @@ export default function TeamManagement({
                         </tr>
                     </thead>
                     <tbody>
-                        {members.length === 0 && (
+                        {visibleMembers.length === 0 && (
                             <tr>
                                 <td
                                     colSpan={7}
                                     className="px-4 py-10 text-center text-slate-400"
                                 >
-                                    No team members yet.
+                                    {filterLocation ? 'No team members at this location.' : 'No team members yet.'}
                                 </td>
                             </tr>
                         )}
-                        {members.map((m) => (
+                        {visibleMembers.map((m) => (
                             <tr
                                 key={m.id}
                                 className="border-b border-slate-50 hover:bg-slate-50"

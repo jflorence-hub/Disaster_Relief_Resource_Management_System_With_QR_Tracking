@@ -16,7 +16,10 @@ class QrTrackingController extends Controller
 {
     public function index(Request $request): Response
     {
+        $user = $request->user();
+        $isAdmin = $user->role === 'admin';
         $scans = QrScan::query()
+            ->when(!$isAdmin, fn ($q) => $q->where('scanned_by', $user->id))
             ->with([
                 'resource:id,name,qr_code,unit',
                 'location:id,name',
@@ -163,6 +166,7 @@ class QrTrackingController extends Controller
 
         return Inertia::render('qr-tracking', [
             'scans' => $scans,
+            'userRole' => $user->role,
 
             /*
              * Only resources with available stock can be scanned.
@@ -176,6 +180,7 @@ class QrTrackingController extends Controller
                 'location_id'
             )
                 ->with('location:id,name')
+                ->when(!$isAdmin, fn ($q) => $q->where('location_id', $user->location_id))
                 ->where('quantity', '>', 0)
                 ->orderBy('name')
                 ->get(),
@@ -185,10 +190,30 @@ class QrTrackingController extends Controller
              */
             'locations' => Location::select(
                 'id',
-                'name'
+                'name',
+                'contact_person'
             )
+                ->when(!$isAdmin && $user->location_id, fn ($q) => $q->whereKey($user->location_id))
                 ->orderBy('name')
                 ->get(),
+
+            /*
+             * Purok handlers — staff with an assigned purok, for the receiver dropdown.
+             * Each entry includes the purok name and location_id so the frontend can
+             * filter them when a destination location is selected.
+             */
+            'purokHandlers' => \App\Models\User::where('role', 'staff')
+                ->whereNotNull('purok_id')
+                ->with('location:id,name')
+                ->orderBy('name')
+                ->get(['id', 'name', 'purok_id', 'location_id'])
+                ->map(fn ($u) => [
+                    'id'          => $u->id,
+                    'name'        => $u->name,
+                    'purok_id'    => $u->purok_id,
+                    'location_id' => $u->location_id,
+                    'location_name' => $u->location?->name,
+                ]),
         ]);
     }
 
@@ -301,6 +326,11 @@ class QrTrackingController extends Controller
              * Get the SOURCE before changing anything.
              */
             $sourceId = $resource->location_id;
+
+            // Staff may scan only stock at their assigned location.
+            if ($request->user()->role === 'staff' && $request->user()->location_id !== null && (int) $sourceId !== (int) $request->user()->location_id) {
+                abort(403, 'You can only record QR transactions for resources at your assigned location.');
+            }
 
             /*
              * Destination supplied by user.
@@ -646,10 +676,8 @@ class QrTrackingController extends Controller
     /**
      * Delete QR scan history.
      */
-    public function destroy(
-        QrScan $qrScan
-    ): RedirectResponse {
-
+    public function destroy(Request $request, QrScan $qrScan): RedirectResponse {
+        abort_unless($request->user()->role === 'admin', 403, 'Only administrators can delete scan history.');
         $qrScan->delete();
 
         return back()->with(

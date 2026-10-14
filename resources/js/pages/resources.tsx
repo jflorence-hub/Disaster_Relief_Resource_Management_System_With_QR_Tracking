@@ -27,6 +27,32 @@ const categories = [
     'other',
 ];
 
+// Keep in sync with ResourceController::DISASTER_TYPES
+const DISASTER_TYPES = [
+    'Typhoon',
+    'Flood',
+    'Earthquake',
+    'Volcanic Eruption',
+    'Landslide',
+    'Tsunami',
+    'Storm Surge',
+    'Drought',
+    'Wildfire',
+    'Tornado',
+    'Hurricane',
+    'Cyclone',
+    'Flash Flood',
+    'Mudslide',
+    'Hailstorm',
+    'Blizzard',
+    'Heat Wave',
+    'Cold Wave',
+    'Industrial Accident',
+    'Oil Spill',
+    'Pandemic / Disease Outbreak',
+    'Other',
+];
+
 const statusBadge: Record<string, string> = {
     in_stock: 'badge-green',
     low_stock: 'badge-amber',
@@ -42,6 +68,7 @@ interface FormData {
     expiry_date: string;
     location_id: string;
     notes: string;
+    disaster: string;
 }
 
 const emptyForm: FormData = {
@@ -53,19 +80,23 @@ const emptyForm: FormData = {
     expiry_date: '',
     location_id: '',
     notes: '',
+    disaster: '',
 };
 
 export default function Resources({
     resources,
     locations,
     filters,
+    userRole,
 }: {
     resources: ResourceItem[];
+    userRole: string;
     locations: Location[];
     filters: {
         search?: string;
         category?: string;
         location_id?: string;
+        disaster?: string;
     };
 }) {
     const mainWarehouse = locations.find(
@@ -78,6 +109,10 @@ export default function Resources({
     const [selectedLocation, setSelectedLocation] = useState(
         filters.location_id ??
             (mainWarehouse ? String(mainWarehouse.id) : ''),
+    );
+
+    const [selectedDisaster, setSelectedDisaster] = useState(
+        filters.disaster ?? '',
     );
 
     const [showForm, setShowForm] = useState(false);
@@ -129,6 +164,7 @@ export default function Resources({
                 ? String(resource.location_id)
                 : '',
             notes: resource.notes ?? '',
+            disaster: resource.disaster ?? '',
         });
 
         setShowForm(true);
@@ -175,6 +211,7 @@ export default function Resources({
                 ...filters,
                 search: value,
                 location_id: selectedLocation || undefined,
+                disaster: selectedDisaster || undefined,
             },
             {
                 preserveState: true,
@@ -195,6 +232,28 @@ export default function Resources({
                 ...filters,
                 search,
                 location_id: value || undefined,
+                disaster: selectedDisaster || undefined,
+            },
+            {
+                preserveState: true,
+                replace: true,
+            },
+        );
+    };
+
+    /*
+     * DISASTER FILTER
+     */
+    const changeDisaster = (value: string) => {
+        setSelectedDisaster(value);
+
+        router.get(
+            '/resources',
+            {
+                ...filters,
+                search,
+                location_id: selectedLocation || undefined,
+                disaster: value || undefined,
             },
             {
                 preserveState: true,
@@ -245,9 +304,10 @@ export default function Resources({
                     />
                 </div>
 
-                {/* LOCATION + ADD RESOURCE */}
+                {/* LOCATION + DISASTER + ADD RESOURCE */}
                 <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                     <select
+                        disabled={userRole !== 'admin'}
                         className="input-field min-w-[210px]"
                         value={selectedLocation}
                         onChange={(e) =>
@@ -264,14 +324,29 @@ export default function Resources({
                         ))}
                     </select>
 
-                    <button
+                    <select
+                        className="input-field min-w-[180px]"
+                        value={selectedDisaster}
+                        onChange={(e) =>
+                            changeDisaster(e.target.value)
+                        }
+                    >
+                        <option value="">All Disasters</option>
+                        {DISASTER_TYPES.map((d) => (
+                            <option key={d} value={d}>
+                                {d}
+                            </option>
+                        ))}
+                    </select>
+
+                    {userRole === 'admin' && <button
                         type="button"
                         className="btn-primary flex min-w-[160px] shrink-0 items-center justify-center gap-2 whitespace-nowrap"
                         onClick={openCreate}
                     >
                         <Plus size={16} />
                         Add Resource
-                    </button>
+                    </button>}
                 </div>
             </div>
 
@@ -311,6 +386,10 @@ export default function Resources({
                             </th>
 
                             <th className="px-4 py-3">
+                                Disaster
+                            </th>
+
+                            <th className="px-4 py-3">
                                 Status
                             </th>
 
@@ -324,7 +403,7 @@ export default function Resources({
                         {resources.length === 0 && (
                             <tr>
                                 <td
-                                    colSpan={6}
+                                    colSpan={7}
                                     className="px-4 py-10 text-center text-slate-400"
                                 >
                                     No resources found at this
@@ -368,6 +447,16 @@ export default function Resources({
                                     {r.location?.name ?? '—'}
                                 </td>
 
+                                <td className="px-4 py-3 text-slate-600">
+                                    {r.disaster ? (
+                                        <span className="inline-flex items-center rounded-md bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700 ring-1 ring-orange-200">
+                                            {r.disaster}
+                                        </span>
+                                    ) : (
+                                        <span className="text-slate-300">—</span>
+                                    )}
+                                </td>
+
                                 <td className="px-4 py-3">
                                     <span
                                         className={`badge ${statusBadge[r.status]}`}
@@ -394,7 +483,7 @@ export default function Resources({
                                         </button>
 
                                         {/* EDIT */}
-                                        <button
+                                        {userRole === 'admin' && <button
                                             type="button"
                                             className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
                                             onClick={() =>
@@ -403,10 +492,10 @@ export default function Resources({
                                             title="Edit resource"
                                         >
                                             <Pencil size={15} />
-                                        </button>
+                                        </button>}
 
                                         {/* DELETE */}
-                                        <button
+                                        {userRole === 'admin' && <button
                                             type="button"
                                             className="rounded-lg p-1.5 text-red-500 hover:bg-red-50"
                                             onClick={() =>
@@ -415,7 +504,7 @@ export default function Resources({
                                             title="Delete resource"
                                         >
                                             <Trash2 size={15} />
-                                        </button>
+                                        </button>}
                                     </div>
                                 </td>
                             </tr>
@@ -619,6 +708,41 @@ export default function Resources({
                                     )
                                 }
                             />
+                        </div>
+
+                        {/* DISASTER */}
+                        <div className="sm:col-span-2">
+                            <label className="label">
+                                Disaster (optional)
+                            </label>
+
+                            <select
+                                className="input-field"
+                                value={form.data.disaster}
+                                onChange={(e) =>
+                                    form.setData(
+                                        'disaster',
+                                        e.target.value,
+                                    )
+                                }
+                            >
+                                <option value="">— None —</option>
+                                {DISASTER_TYPES.map((d) => (
+                                    <option key={d} value={d}>
+                                        {d}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <p className="mt-1 text-xs text-slate-400">
+                                Tag this resource to a specific type of disaster for filtering.
+                            </p>
+
+                            {form.errors.disaster && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.disaster}
+                                </p>
+                            )}
                         </div>
                     </div>
 

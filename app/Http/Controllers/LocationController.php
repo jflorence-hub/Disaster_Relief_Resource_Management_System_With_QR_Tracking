@@ -12,7 +12,10 @@ class LocationController extends Controller
 {
     public function index(Request $request): Response
     {
+        $user = $request->user();
+        $isAdmin = $user->role === 'admin';
         $locations = Location::query()
+            ->when(!$isAdmin && $user->location_id, fn ($q) => $q->whereKey($user->location_id))
             ->withCount('families')
             ->withCount('resources')
             ->withSum('resources', 'quantity')
@@ -51,6 +54,7 @@ class LocationController extends Controller
 
         return Inertia::render('locations', [
             'locations' => $locations,
+            'userRole' => $user->role,
             'filters' => $request->only([
                 'search',
                 'type'
@@ -60,6 +64,7 @@ class LocationController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        abort_unless($request->user()->role === 'admin', 403, 'Only administrators can create locations.');
         Location::create(
             $this->validated($request)
         );
@@ -74,6 +79,7 @@ class LocationController extends Controller
         Request $request,
         Location $location
     ): RedirectResponse {
+        abort_unless($request->user()->role === 'admin', 403, 'Only administrators can edit locations.');
         $location->update(
             $this->validated($request)
         );
@@ -84,9 +90,8 @@ class LocationController extends Controller
         );
     }
 
-    public function destroy(
-        Location $location
-    ): RedirectResponse {
+    public function destroy(Request $request, Location $location): RedirectResponse {
+        abort_unless($request->user()->role === 'admin', 403, 'Only administrators can delete locations.');
         $location->delete();
 
         return back()->with(
@@ -99,20 +104,17 @@ class LocationController extends Controller
         Request $request
     ): array {
         return $request->validate([
-            'name' => 'required|string|max:255',
-            'type' => 'required|in:warehouse,distribution_center,shelter,field_office',
-            'address' => 'required|string|max:255',
-            'city' => 'required|string|max:255',
-            'latitude' => 'nullable|numeric|between:-90,90',
-            'longitude' => 'nullable|numeric|between:-180,180',
-
-            // Keep this for now if your Locations form/database
-            // still has the capacity field.
-            'capacity' => 'required|integer|min:0',
-
+            'name'           => 'required|string|max:255',
+            'type'           => 'required|in:warehouse,distribution_center,shelter,field_office',
+            'address'        => 'required|string|max:255',
+            'city'           => 'required|string|max:255',
+            'latitude'       => 'nullable|numeric|between:-90,90',
+            'longitude'      => 'nullable|numeric|between:-180,180',
+            'capacity'       => 'required|integer|min:0',
             'contact_person' => 'nullable|string|max:255',
-            'contact_phone' => 'nullable|string|max:50',
-            'status' => 'required|in:active,inactive,maintenance',
+            'contact_phone'  => 'nullable|string|max:50',
+            'email'          => 'nullable|email|max:255',
+            'status'         => 'required|in:active,inactive,maintenance',
         ]);
     }
 }
