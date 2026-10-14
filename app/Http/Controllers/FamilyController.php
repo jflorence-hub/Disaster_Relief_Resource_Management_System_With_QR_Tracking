@@ -8,6 +8,7 @@ use App\Models\Purok;
 use App\Models\Resource;
 use App\Models\User;
 use App\Models\Location;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -263,6 +264,23 @@ class FamilyController extends Controller
             'success',
             'Family added successfully.'
         );
+    }
+
+    /**
+     * Return household members for a family as JSON (used by admin web frontend).
+     */
+    public function members(Family $family): JsonResponse
+    {
+        $members = $family->household_member()
+            ->orderBy('household_member_number')
+            ->get(['id', 'household_member_number', 'name'])
+            ->map(fn ($m) => [
+                'id'     => $m->id,
+                'number' => $m->household_member_number,
+                'name'   => $m->display_name,
+            ]);
+
+        return response()->json(['members' => $members]);
     }
 
     /**

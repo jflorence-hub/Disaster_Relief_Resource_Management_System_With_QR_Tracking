@@ -68,6 +68,10 @@ export default function QrTracking({
     const [purokName, setPurokName]   = useState('');
     const [reliefName, setReliefName] = useState('');
 
+    // Claimed-by dropdown state
+    const [familyMembers, setFamilyMembers] = useState<Array<{ id: number; number: number; name: string }>>([]);
+    const [loadingMembers, setLoadingMembers] = useState(false);
+
     // History accordion — which date groups are open
     const [openDates, setOpenDates] = useState<Set<string>>(new Set());
 
@@ -112,6 +116,8 @@ export default function QrTracking({
         setFamilyHead('');
         setPurokName('');
         setReliefName('');
+        setFamilyMembers([]);
+        setLoadingMembers(false);
         setCameraOn(false);
         setShowScan(true);
     };
@@ -119,9 +125,23 @@ export default function QrTracking({
     const selectFamily = (familyId: string) => {
         const fam = families.find((f) => String(f.id) === familyId);
         form.setData('family_id', familyId);
+        form.setData('receiver', '');
         setFamilyHead(fam?.head_name ?? '');
         setPurokName(fam?.purok ?? '');
         setReliefName(fam?.latest_distribution?.resource?.name ?? '');
+
+        // Fetch household members for "Claimed by" dropdown
+        setFamilyMembers([]);
+        if (familyId) {
+            setLoadingMembers(true);
+            fetch(`/families/${familyId}/members`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then((r) => r.json())
+                .then((data) => {
+                    setFamilyMembers(data.members ?? []);
+                })
+                .catch(() => {})
+                .finally(() => setLoadingMembers(false));
+        }
     };
 
     // When the camera decodes a QR, store it and try to match a family
@@ -447,13 +467,36 @@ export default function QrTracking({
                             {/* CLAIMED BY */}
                             <div className="sm:col-span-2">
                                 <label className="label">Claimed by</label>
-                                <input
-                                    type="text"
-                                    className="input-field"
-                                    placeholder="Name of person claiming relief"
-                                    value={form.data.receiver}
-                                    onChange={(e) => form.setData('receiver', e.target.value)}
-                                />
+                                {loadingMembers ? (
+                                    <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-400">
+                                        <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                        </svg>
+                                        Loading members…
+                                    </div>
+                                ) : familyMembers.length > 0 ? (
+                                    <select
+                                        className="input-field"
+                                        value={form.data.receiver}
+                                        onChange={(e) => form.setData('receiver', e.target.value)}
+                                    >
+                                        <option value="">Select family member…</option>
+                                        {familyMembers.map((m) => (
+                                            <option key={m.id} value={m.name}>
+                                                {m.number}. {m.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        placeholder="Name of person claiming relief"
+                                        value={form.data.receiver}
+                                        onChange={(e) => form.setData('receiver', e.target.value)}
+                                    />
+                                )}
                                 {form.errors.receiver && <p className="mt-1 text-xs text-red-600">{form.errors.receiver}</p>}
                             </div>
                         </div>

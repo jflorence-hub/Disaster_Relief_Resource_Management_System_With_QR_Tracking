@@ -71,6 +71,7 @@ Route::middleware(['auth', 'must.change.password'])->group(function () {
 
     Route::resource('families', FamilyController::class)
         ->only(['index', 'store', 'update', 'destroy']);
+    Route::get('families/{family}/members', [FamilyController::class, 'members'])->name('families.members');
 
     Route::resource('resources', ResourceController::class)
         ->only(['index', 'store', 'update', 'destroy']);
