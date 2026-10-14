@@ -83,6 +83,8 @@ interface FormData {
     distribution_date: string;
     status: string;
     notes: string;
+    reason: string;
+    disaster: string;
 }
 
 const emptyForm: FormData = {
@@ -95,7 +97,21 @@ const emptyForm: FormData = {
     distribution_date: '',
     status: 'pending',
     notes: '',
+    reason: '',
+    disaster: '',
 };
+
+// Keep in sync with ResourceController::DISASTER_TYPES
+const DISASTER_TYPES = [
+    'Typhoon',
+    'Flood',
+    'Earthquake',
+    'Fire',
+    'Drought',
+    'Landslide',
+    'Volcanic Eruption',
+    'Other',
+];
 
 export default function DistributionPage({
     distributions,
@@ -390,6 +406,10 @@ export default function DistributionPage({
             status: distribution.status ?? 'pending',
 
             notes: distribution.notes ?? '',
+
+            reason: (distribution as Distribution & { reason?: string }).reason ?? '',
+
+            disaster: (distribution as Distribution & { disaster?: string }).disaster ?? '',
         });
     };
 
@@ -434,6 +454,10 @@ export default function DistributionPage({
             status: form.data.status,
 
             notes: form.data.notes || null,
+
+            reason: form.data.reason || null,
+
+            disaster: form.data.disaster || null,
         };
 
         console.log('UPDATING DISTRIBUTION:', editingDistribution.id);
@@ -1402,6 +1426,57 @@ export default function DistributionPage({
                                     }
                                     placeholder="Optional notes..."
                                 />
+                            </div>
+
+                            {/* REASON */}
+
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Reason
+                                </label>
+
+                                <textarea
+                                    className="input-field min-h-[80px]"
+                                    value={form.data.reason}
+                                    onChange={(e) =>
+                                        form.setData('reason', e.target.value)
+                                    }
+                                    placeholder="Reason for this distribution…"
+                                />
+                                {form.errors.reason && (
+                                    <p className="mt-1 text-xs text-red-500">
+                                        {form.errors.reason}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* DISASTER */}
+
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Disaster
+                                </label>
+
+                                <select
+                                    className="input-field"
+                                    value={form.data.disaster}
+                                    onChange={(e) =>
+                                        form.setData('disaster', e.target.value)
+                                    }
+                                >
+                                    <option value="">— None —</option>
+                                    {DISASTER_TYPES.map((d) => (
+                                        <option key={d} value={d}>
+                                            {d}
+                                        </option>
+                                    ))}
+                                </select>
+
+                                {form.errors.disaster && (
+                                    <p className="mt-1 text-xs text-red-500">
+                                        {form.errors.disaster}
+                                    </p>
+                                )}
                             </div>
                         </div>
 

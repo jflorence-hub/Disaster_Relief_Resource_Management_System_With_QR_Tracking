@@ -5,6 +5,7 @@ import {
     LayoutDashboard,
     LogOut,
     MapPin,
+    Megaphone,
     MessageCircle,
     Menu,
     Package,
@@ -25,6 +26,7 @@ const navItems = [
     { href: '/locations', label: 'Locations', icon: MapPin, adminOnly: false },
     { href: '/reports', label: 'Reports', icon: FileText, adminOnly: false },
     { href: '/messages', label: 'Messages', icon: MessageCircle, adminOnly: false },
+    { href: '/announcements', label: 'Announcements', icon: Megaphone, adminOnly: true },
     { href: '/team', label: 'Team Management', icon: Users, adminOnly: true },
     { href: '/families', label: 'Families', icon: House, adminOnly: false },
     { href: '/settings', label: 'Settings', icon: Settings, adminOnly: true },
@@ -118,12 +120,15 @@ export default function AppLayout({
                     </div>
                     <div className="flex items-center gap-4">
                         <Link href="/messages" aria-label="Messages" title="Messages" className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100"><MessageCircle size={20} /></Link>
+                        {isAdmin && (
+                            <Link href="/announcements" aria-label="Announcements" title="Announcements" className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100"><Megaphone size={20} /></Link>
+                        )}
                         <div className="flex items-center gap-2.5 border-l border-slate-200 pl-4">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700">
+                            <Link href="/profile" className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700 hover:ring-2 hover:ring-blue-300" title="View Profile">
                                 {user?.name?.charAt(0)?.toUpperCase() ?? '?'}
-                            </div>
+                            </Link>
                             <div className="hidden text-left sm:block">
-                                <p className="text-sm font-medium text-slate-800">{user?.name}</p>
+                                <Link href="/profile" className="text-sm font-medium text-slate-800 hover:text-blue-600">{user?.name}</Link>
                                 <p className="text-xs capitalize text-slate-500">{user?.role}</p>
                             </div>
                         </div>

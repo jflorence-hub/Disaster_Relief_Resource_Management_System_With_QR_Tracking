@@ -1,7 +1,7 @@
 import AppLayout from '@/layouts/app-layout';
 import { Distribution, Location, QrScan, ResourceItem } from '@/types/models';
 import { Head, Link, router } from '@inertiajs/react';
-import { AlertTriangle, CheckCircle2, MapPin, Package, Plus, QrCode, ScanLine, Truck, Users } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, MapPin, Megaphone, Package, Plus, QrCode, ScanLine, Truck, Users } from 'lucide-react';
 import { useEffect } from 'react';
 
 interface Stats {
@@ -30,7 +30,7 @@ export default function Dashboard({
     recentScans: QrScan[];
     lowStockResources: (ResourceItem & { location?: Location })[];
     userRole: string;
-    staffContext?: { location: string | null; hasPurok: boolean; purok: string | null } | null;
+    staffContext?: { location: string | null; hasPurok: boolean; purok: string | null; handler?: string | null } | null;
 }) {
     // Poll so stats/scans/low-stock reflect scans recorded from the mobile app.
     useEffect(() => {
@@ -56,6 +56,7 @@ export default function Dashboard({
 
     const quickActions = [
         ...(userRole === 'admin' ? [{ href: '/resources', label: 'Add Resource', icon: Plus }] : []),
+        ...(userRole === 'admin' ? [{ href: '/announcements', label: 'Announcements', icon: Megaphone }] : []),
         { href: '/qr-tracking', label: 'Scan QR Code', icon: ScanLine },
         { href: '/reports', label: 'Generate Report', icon: Package },
         { href: '/messages', label: 'Message Admin', icon: Users },
@@ -65,7 +66,7 @@ export default function Dashboard({
         <AppLayout title="Dashboard" subtitle="Overview of relief operations">
             <Head title="Dashboard" />
 
-            {staffContext && <div className="card mb-6"><h2 className="text-lg font-semibold text-slate-800">My Assignment</h2><p className="mt-3 text-sm text-slate-500">Assigned Location</p><p className="font-medium text-slate-800">{staffContext.location ?? 'Not assigned'}</p><p className="mt-3 text-sm text-slate-500">Assigned Purok</p><p className="font-medium text-slate-800">{staffContext.hasPurok ? staffContext.purok ?? '' : 'Not assigned'}</p></div>}
+            {staffContext && <div className="card mb-6"><h2 className="text-lg font-semibold text-slate-800">My Assignment</h2><p className="mt-3 text-sm text-slate-500">Assigned Location</p><p className="font-medium text-slate-800">{staffContext.location ?? 'Not assigned'}</p><p className="mt-3 text-sm text-slate-500">Assigned Purok</p><p className="font-medium text-slate-800">{staffContext.hasPurok ? staffContext.purok ?? '' : 'Not assigned'}</p><p className="mt-3 text-sm text-slate-500">Purok Handler</p><p className="font-medium text-slate-800">{staffContext.handler ?? 'Unknown'}</p></div>}
 
             <div className="mb-6 flex flex-wrap gap-3">
                 {quickActions.map((a) => (
