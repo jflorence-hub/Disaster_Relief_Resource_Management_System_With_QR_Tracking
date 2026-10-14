@@ -7,12 +7,11 @@ use App\Models\QrScan;
 use App\Models\Resource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class QrTrackingController extends Controller
 {
     /**
-     * Look up a resource by its QR code value straight after a camera scan.
+     * Look up a resource by QR code (kept for route compatibility).
      */
     public function lookup(Request $request): JsonResponse
     {
@@ -24,7 +23,7 @@ class QrTrackingController extends Controller
 
         if (! $resource) {
             return response()->json([
-                'found' => false,
+                'found'   => false,
                 'message' => 'No resource matches this QR code.',
             ], 404);
         }
@@ -35,59 +34,48 @@ class QrTrackingController extends Controller
             ->first();
 
         return response()->json([
-            'found' => true,
-            'resource' => $resource,
+            'found'     => true,
+            'resource'  => $resource,
             'last_scan' => $lastScan,
         ]);
     }
 
     /**
-     * Record a scan from the mobile app. This writes to the same database
-     * the admin web dashboard reads from, so the change is reflected there
-     * as soon as the admin page is loaded or polled.
+     * Record a scan from the mobile app.
      */
     public function store(Request $request): JsonResponse
     {
-        $data = $request->validate([
-            'qr_code' => 'required|string|exists:resources,qr_code',
-            'location_id' => 'nullable|exists:locations,id',
-            'scan_type' => 'required|in:check_in,check_out,audit,transfer',
-            'recipient_name' => 'nullable|string|max:255',
-            'quantity_change' => 'required|integer',
-            'notes' => 'nullable|string',
+        $validated = $request->validate([
+            'qr_code'         => 'nullable|string',
+            'family_id'       => 'nullable|exists:families,id',
+            'location_id'     => 'nullable|exists:locations,id',
+            'scan_type'       => 'required|in:check_in,check_out,audit,transfer',
+            'quantity_change'  => 'required|integer|min:1',
+            'scan_date'       => 'nullable|date',
+            'scan_time'       => 'nullable|string|max:10',
         ]);
 
-        $scan = DB::transaction(function () use ($data, $request) {
-            $resource = Resource::where('qr_code', $data['qr_code'])->firstOrFail();
+        $scan = QrScan::create([
+            'family_id'       => $validated['family_id'] ?? null,
+            'location_id'     => $validated['location_id'] ?? null,
+            'scanned_by'      => $request->user()->id,
+            'scan_type'       => $validated['scan_type'],
+            'quantity_change' => (int) $validated['quantity_change'],
+            'scanned_at'      => now(),
+            'scan_date'       => $validated['scan_date'] ?? now()->toDateString(),
+            'scan_time'       => $validated['scan_time'] ?? now()->format('H:i'),
+        ]);
 
-            $scan = QrScan::create([
-                'resource_id' => $resource->id,
-                'location_id' => $data['location_id'] ?? $resource->location_id,
-                'scanned_by' => $request->user()->id,
-                'scan_type' => $data['scan_type'],
-                'recipient_name' => $data['recipient_name'] ?? null,
-                'quantity_change' => $data['quantity_change'],
-                'notes' => $data['notes'] ?? null,
-                'scanned_at' => now(),
-            ]);
-
-            if ($data['quantity_change'] !== 0) {
-                $resource->quantity = max(0, $resource->quantity + $data['quantity_change']);
-                $resource->save();
-            }
-
-            if (! empty($data['location_id']) && $data['location_id'] != $resource->location_id) {
-                $resource->location_id = $data['location_id'];
-                $resource->save();
-            }
-
-            return $scan->load(['resource.location:id,name', 'location:id,name', 'scanner:id,name']);
-        });
+        $scan->load([
+            'family:id,family_id,family_name,head_name,purok_id',
+            'family.purok:id,name',
+            'location:id,name',
+            'scanner:id,name',
+        ]);
 
         return response()->json([
             'message' => 'Scan recorded successfully.',
-            'scan' => $scan,
-            'resource' => $scan->resource,
+            'scan'    => $scan,
         ], 201);
     }
 
@@ -96,7 +84,13 @@ class QrTrackingController extends Controller
      */
     public function index(): JsonResponse
     {
-        $scans = QrScan::with(['resource:id,name,qr_code,unit', 'location:id,name', 'scanner:id,name'])
+        $scans = QrScan::with([
+            'family:id,family_id,family_name,head_name,purok_id',
+            'family.purok:id,name',
+            'resource:id,name,qr_code,unit',
+            'location:id,name',
+            'scanner:id,name',
+        ])
             ->orderByDesc('scanned_at')
             ->limit(50)
             ->get();

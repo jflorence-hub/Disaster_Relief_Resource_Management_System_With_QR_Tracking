@@ -87,8 +87,10 @@ export interface Distribution {
 export interface QrScan {
     id: number;
 
-    resource_id: number;
+    resource_id?: number | null;
     destination_resource_id?: number | null;
+
+    family_id?: number | null;
 
     location_id?: number | null;
     from_location_id?: number | null;
@@ -102,18 +104,37 @@ export interface QrScan {
     notes?: string | null;
     scanned_at: string;
 
-    resource?: ResourceItem;
-    destination_resource?: ResourceItem;
+    scan_date?: string | null;
+    scan_time?: string | null;
 
-    location?: Location;
+    family?: {
+        id: number;
+        family_id: string;
+        family_name: string;
+        head_name: string;
+        purok?: string | null;
+    } | null;
 
-    from_location?: Location;
-    to_location?: Location;
+    resource?: ResourceItem | null;
+    destination_resource?: ResourceItem | null;
+
+    location?: Location | null;
+
+    from_location?: Location | null;
+    to_location?: Location | null;
 
     scanner?: {
         id: number;
         name: string;
-    };
+    } | null;
+}
+
+export interface FamilyOption {
+    id: number;
+    family_id: string;
+    family_name: string;
+    head_name: string;
+    purok?: string | null;
 }
 
 export interface TeamMember {

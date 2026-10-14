@@ -2,9 +2,9 @@ import CameraScanner from '@/components/camera-scanner';
 import ConfirmDialog from '@/components/confirm-dialog';
 import Modal from '@/components/modal';
 import AppLayout from '@/layouts/app-layout';
-import { Location, QrScan, ResourceItem } from '@/types/models';
+import { FamilyOption, Location, QrScan } from '@/types/models';
 import { Head, router, useForm } from '@inertiajs/react';
-import { Camera, ChevronDown, ChevronRight, History, QrCode, ScanLine, Trash2 } from 'lucide-react';
+import { Camera, ChevronDown, ChevronRight, History, ScanLine, Trash2 } from 'lucide-react';
 import { FormEventHandler, useCallback, useEffect, useMemo, useState } from 'react';
 
 const scanTypeBadge: Record<string, string> = {
@@ -16,51 +16,61 @@ const scanTypeBadge: Record<string, string> = {
 
 interface FormData {
     qr_code: string;
+    family_id: string;
     location_id: string;
-    to_location_id: string;
     scan_type: string;
-    recipient_name: string;   // kept for backend compat
     quantity_change: number | string;
-    notes: string;
+    scan_date: string;
+    scan_time: string;
 }
 
-const emptyForm: FormData = {
+function todayStr() {
+    return new Date().toISOString().split('T')[0];
+}
+
+function nowTimeStr() {
+    return new Date().toTimeString().slice(0, 5);
+}
+
+const emptyForm = (): FormData => ({
     qr_code: '',
+    family_id: '',
     location_id: '',
-    to_location_id: '',
     scan_type: 'check_in',
-    recipient_name: '',
-    quantity_change: '',
-    notes: '',
-};
+    quantity_change: 1,
+    scan_date: todayStr(),
+    scan_time: nowTimeStr(),
+});
 
 export default function QrTracking({
     scans,
-    resources,
+    families,
     locations,
     userRole,
 }: {
     scans: QrScan[];
-    resources: ResourceItem[];
+    families: FamilyOption[];
     locations: Location[];
     userRole: string;
 }) {
-    const [showScan, setShowScan]   = useState(false);
-    const [deleting, setDeleting]   = useState<QrScan | null>(null);
-    const [matched, setMatched]     = useState<ResourceItem | null | undefined>(undefined);
-    const [cameraOn, setCameraOn]   = useState(false);
-    const [lookupError, setLookupError] = useState<string | null>(null);
+    const [showScan, setShowScan] = useState(false);
+    const [deleting, setDeleting] = useState<QrScan | null>(null);
+    const [cameraOn, setCameraOn] = useState(false);
+
+    // Auto-filled display fields
+    const [familyHead, setFamilyHead] = useState('');
+    const [purokName, setPurokName]   = useState('');
 
     // History accordion — which date groups are open
     const [openDates, setOpenDates] = useState<Set<string>>(new Set());
 
-    const form = useForm<FormData>(emptyForm);
+    const form = useForm<FormData>(emptyForm());
 
     // Auto-refresh
     useEffect(() => {
         const interval = setInterval(() => {
             if (!showScan && !deleting) {
-                router.reload({ only: ['scans', 'resources'] });
+                router.reload({ only: ['scans', 'families'] });
             }
         }, 15000);
         return () => clearInterval(interval);
@@ -70,9 +80,10 @@ export default function QrTracking({
     const scansByDate = useMemo(() => {
         const groups: Record<string, QrScan[]> = {};
         scans.forEach((s) => {
-            const day = new Date(s.scanned_at as string).toLocaleDateString('en-US', {
-                year: 'numeric', month: 'long', day: 'numeric',
-            });
+            const dateStr = s.scan_date ?? (s.scanned_at ? new Date(s.scanned_at as string).toISOString().split('T')[0] : null);
+            const day = dateStr
+                ? new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+                : 'Unknown Date';
             if (!groups[day]) groups[day] = [];
             groups[day].push(s);
         });
@@ -89,60 +100,51 @@ export default function QrTracking({
         });
     };
 
-    // Filtered purok handlers for the receiver dropdown — no longer used
-    // (receiver is derived from the selected location's contact_person)
-    const [selectedToLocation, setSelectedToLocation] = useState('');
-
     const openScan = () => {
-        form.setData({ ...emptyForm });
-        setMatched(undefined);
-        setLookupError(null);
+        form.setData(emptyForm());
+        setFamilyHead('');
+        setPurokName('');
         setCameraOn(false);
-        setSelectedToLocation('');
         setShowScan(true);
     };
 
-    const selectResource = (resource: ResourceItem) => {
-        setMatched(resource);
-        setLookupError(null);
-        form.setData('qr_code', resource.qr_code);
-        form.setData('location_id', resource.location_id ? String(resource.location_id) : '');
-        form.setData('to_location_id', '');
-        form.setData('recipient_name', '');
-        setSelectedToLocation('');
+    const selectFamily = (familyId: string) => {
+        const fam = families.find((f) => String(f.id) === familyId);
+        form.setData('family_id', familyId);
+        setFamilyHead(fam?.head_name ?? '');
+        setPurokName(fam?.purok ?? '');
     };
 
+    // When the camera decodes a QR, store it and try to match a family
     const handleDecoded = useCallback(
         (value: string) => {
             setCameraOn(false);
-            const resource = resources.find((r) => r.qr_code === value.trim());
-            if (resource) {
-                selectResource(resource);
-            } else {
-                setMatched(null);
-                setLookupError(`No resource found for QR code "${value}".`);
+            form.setData('qr_code', value.trim());
+            // Try to match against family_id string (DIST- prefix or family code)
+            const match = families.find(
+                (f) => f.family_id === value.trim(),
+            );
+            if (match) {
+                selectFamily(String(match.id));
             }
         },
-        [resources],
+        [families],
     );
 
     const submit: FormEventHandler = (e) => {
         e.preventDefault();
-        if (!matched) { setLookupError('Please select or scan a resource.'); return; }
         const quantity = Number(form.data.quantity_change);
         if (!Number.isInteger(quantity) || quantity < 1) {
             form.setError('quantity_change', 'Quantity must be a positive whole number.');
             return;
         }
-        if ((form.data.scan_type === 'check_in' || form.data.scan_type === 'transfer') && !form.data.to_location_id) {
-            form.setError('to_location_id', 'Please select a destination location.');
-            return;
-        }
-        if (form.data.scan_type === 'check_out' || form.data.scan_type === 'audit') {
-            form.setData('to_location_id', '');
-        }
         form.post('/qr-tracking', {
-            onSuccess: () => { setShowScan(false); form.reset(); setMatched(undefined); setLookupError(null); setSelectedToLocation(''); },
+            onSuccess: () => {
+                setShowScan(false);
+                form.reset();
+                setFamilyHead('');
+                setPurokName('');
+            },
         });
     };
 
@@ -152,7 +154,7 @@ export default function QrTracking({
     };
 
     return (
-        <AppLayout title="QR Tracking" subtitle="Scan supplies in and out to keep an audit trail">
+        <AppLayout title="QR Tracking" subtitle="Record family relief scans to keep a distribution audit trail">
             <Head title="QR Tracking" />
 
             {/* RECORD SCAN BUTTON */}
@@ -176,7 +178,7 @@ export default function QrTracking({
                 ) : (
                     <div className="divide-y divide-slate-100">
                         {dateKeys.map((day) => {
-                            const isOpen = openDates.has(day);
+                            const isOpen   = openDates.has(day);
                             const dayScans = scansByDate[day];
                             return (
                                 <div key={day}>
@@ -204,67 +206,79 @@ export default function QrTracking({
                                             <table className="w-full text-sm">
                                                 <thead>
                                                     <tr className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                                                        <th className="px-4 py-2">Resource</th>
-                                                        <th className="px-4 py-2">Type</th>
+                                                        <th className="px-4 py-2">Family</th>
+                                                        <th className="px-4 py-2">Family Head</th>
+                                                        <th className="px-4 py-2">Purok</th>
+                                                        <th className="px-4 py-2">Relief</th>
                                                         <th className="px-4 py-2">Qty</th>
-                                                        <th className="px-4 py-2">From</th>
-                                                        <th className="px-4 py-2">To</th>
+                                                        <th className="px-4 py-2">Scan Status</th>
                                                         <th className="px-4 py-2">Scanned By</th>
-                                                        <th className="px-4 py-2">Receiver</th>
+                                                        <th className="px-4 py-2">Location</th>
+                                                        <th className="px-4 py-2">Date</th>
                                                         <th className="px-4 py-2">Time</th>
                                                         <th className="px-4 py-2" />
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {dayScans.map((s) => (
-                                                        <tr key={s.id} className="border-t border-slate-50 hover:bg-slate-50">
-                                                            {/* RESOURCE */}
-                                                            <td className="px-4 py-2.5">
-                                                                <div className="flex items-center gap-2">
-                                                                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-                                                                        <QrCode size={14} />
-                                                                    </div>
-                                                                    <div>
-                                                                        <p className="font-medium text-slate-800">{s.resource?.name}</p>
-                                                                        <p className="text-xs text-slate-400">{s.resource?.qr_code}</p>
-                                                                    </div>
-                                                                </div>
-                                                            </td>
-                                                            {/* TYPE */}
-                                                            <td className="px-4 py-2.5">
-                                                                <span className={`badge ${scanTypeBadge[s.scan_type]} capitalize`}>
-                                                                    {s.scan_type.replace('_', ' ')}
-                                                                </span>
-                                                            </td>
-                                                            {/* QTY */}
-                                                            <td className="px-4 py-2.5 text-slate-600">
-                                                                {s.quantity_change > 0 ? `+${s.quantity_change}` : s.quantity_change}
-                                                            </td>
-                                                            {/* FROM */}
-                                                            <td className="px-4 py-2.5 text-slate-500">{s.from_location?.name ?? '—'}</td>
-                                                            {/* TO */}
-                                                            <td className="px-4 py-2.5 text-slate-500">{s.to_location?.name ?? '—'}</td>
-                                                            {/* SCANNED BY */}
-                                                            <td className="px-4 py-2.5 text-slate-500">{s.scanner?.name ?? '—'}</td>
-                                                            {/* RECEIVER */}
-                                                            <td className="px-4 py-2.5 text-slate-500">{s.recipient_name ?? '—'}</td>
-                                                            {/* TIME */}
-                                                            <td className="px-4 py-2.5 text-slate-400 text-xs">
-                                                                {new Date(s.scanned_at as string).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                                                            </td>
-                                                            {/* DELETE */}
-                                                            <td className="px-4 py-2.5">
-                                                                {userRole === 'admin' && (
-                                                                    <button
-                                                                        className="rounded-lg p-1 text-red-400 hover:bg-red-50"
-                                                                        onClick={() => setDeleting(s)}
-                                                                    >
-                                                                        <Trash2 size={14} />
-                                                                    </button>
-                                                                )}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
+                                                    {dayScans.map((s) => {
+                                                        const timeStr = s.scan_time
+                                                            ?? (s.scanned_at ? new Date(s.scanned_at as string).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—');
+                                                        return (
+                                                            <tr key={s.id} className="border-t border-slate-50 hover:bg-slate-50">
+                                                                {/* FAMILY */}
+                                                                <td className="px-4 py-2.5 font-medium text-slate-800">
+                                                                    {s.family?.family_name ?? (s.resource?.name ?? '—')}
+                                                                </td>
+                                                                {/* FAMILY HEAD */}
+                                                                <td className="px-4 py-2.5 text-slate-500">
+                                                                    {s.family?.head_name ?? '—'}
+                                                                </td>
+                                                                {/* PUROK */}
+                                                                <td className="px-4 py-2.5 text-slate-500">
+                                                                    {s.family?.purok ?? '—'}
+                                                                </td>
+                                                                {/* RELIEF */}
+                                                                <td className="px-4 py-2.5 text-slate-500">
+                                                                    {s.resource?.name ?? '—'}
+                                                                </td>
+                                                                {/* QTY */}
+                                                                <td className="px-4 py-2.5 text-slate-600">
+                                                                    {s.quantity_change > 0 ? `+${s.quantity_change}` : s.quantity_change}
+                                                                </td>
+                                                                {/* SCAN STATUS */}
+                                                                <td className="px-4 py-2.5">
+                                                                    <span className={`badge ${scanTypeBadge[s.scan_type] ?? 'badge-blue'} capitalize`}>
+                                                                        {s.scan_type.replace('_', ' ')}
+                                                                    </span>
+                                                                </td>
+                                                                {/* SCANNED BY */}
+                                                                <td className="px-4 py-2.5 text-slate-500">{s.scanner?.name ?? '—'}</td>
+                                                                {/* LOCATION */}
+                                                                <td className="px-4 py-2.5 text-slate-500">
+                                                                    {s.location?.name ?? '—'}
+                                                                </td>
+                                                                {/* DATE */}
+                                                                <td className="px-4 py-2.5 text-slate-400 text-xs">
+                                                                    {s.scan_date ?? (s.scanned_at ? new Date(s.scanned_at as string).toLocaleDateString('en-US') : '—')}
+                                                                </td>
+                                                                {/* TIME */}
+                                                                <td className="px-4 py-2.5 text-slate-400 text-xs">
+                                                                    {timeStr}
+                                                                </td>
+                                                                {/* DELETE */}
+                                                                <td className="px-4 py-2.5">
+                                                                    {userRole === 'admin' && (
+                                                                        <button
+                                                                            className="rounded-lg p-1 text-red-400 hover:bg-red-50"
+                                                                            onClick={() => setDeleting(s)}
+                                                                        >
+                                                                            <Trash2 size={14} />
+                                                                        </button>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
                                                 </tbody>
                                             </table>
                                         </div>
@@ -290,134 +304,62 @@ export default function QrTracking({
 
                     <CameraScanner active={cameraOn} onDecoded={handleDecoded} />
 
-                    {lookupError && <p className="text-xs text-red-600">{lookupError}</p>}
-
-                    <div className="relative">
-                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100" /></div>
-                        <div className="relative flex justify-center">
-                            <span className="bg-white px-2 text-xs text-slate-400">or choose manually</span>
-                        </div>
-                    </div>
-
-                    {/* RESOURCE */}
-                    <div>
-                        <label className="label">Resource / QR code</label>
-                        <select
-                            className="input-field"
-                            value={matched?.id ?? ''}
-                            onChange={(e) => {
-                                const resource = resources.find((r) => r.id === Number(e.target.value));
-                                if (resource) selectResource(resource);
-                            }}
-                        >
-                            <option value="">Choose a resource…</option>
-                            {resources.map((r) => (
-                                <option key={r.id} value={r.id}>{r.name} — {r.qr_code}</option>
-                            ))}
-                        </select>
-                        {form.errors.qr_code && <p className="mt-1 text-xs text-red-600">{form.errors.qr_code}</p>}
-                    </div>
-
-                    {matched && (
-                        <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-700">
-                            <div><strong>Resource:</strong> {matched.name}</div>
-                            <div><strong>Current stock:</strong> {matched.quantity} {matched.unit}</div>
-                            <div><strong>Current location:</strong> {matched.location?.name ?? 'Unassigned'}</div>
-                        </div>
-                    )}
-
                     <form onSubmit={submit} className="space-y-4">
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            {/* SCAN TYPE */}
-                            <div>
-                                <label className="label">Scan type</label>
+
+                            {/* FAMILY */}
+                            <div className="sm:col-span-2">
+                                <label className="label">Family</label>
                                 <select
                                     className="input-field"
-                                    value={form.data.scan_type}
-                                    onChange={(e) => {
-                                        const type = e.target.value;
-                                        form.setData('scan_type', type);
-                                        if (type === 'check_out' || type === 'audit') {
-                                            form.setData('to_location_id', '');
-                                            setSelectedToLocation('');
-                                        }
-                                    }}
+                                    value={form.data.family_id}
+                                    onChange={(e) => selectFamily(e.target.value)}
                                 >
-                                    <option value="check_in">Check In</option>
-                                    <option value="check_out">Check Out</option>
-                                    <option value="audit">Audit</option>
-                                    <option value="transfer">Transfer</option>
+                                    <option value="">Choose a family…</option>
+                                    {families.map((f) => (
+                                        <option key={f.id} value={f.id}>
+                                            {f.family_name} — {f.family_id}
+                                        </option>
+                                    ))}
                                 </select>
+                                {form.errors.family_id && <p className="mt-1 text-xs text-red-600">{form.errors.family_id}</p>}
                             </div>
 
-                            {/* FROM */}
+                            {/* FAMILY HEAD (read-only) */}
                             <div>
-                                <label className="label">From / Current Location</label>
+                                <label className="label">Family Head</label>
                                 <input
                                     type="text"
                                     className="input-field bg-slate-50"
-                                    value={matched?.location?.name ?? 'Unassigned'}
+                                    value={familyHead}
                                     readOnly
+                                    placeholder="Auto-filled from selected family"
                                 />
-                                <p className="mt-1 text-xs text-slate-400">Automatically taken from the resource's current location.</p>
                             </div>
 
-                            {/* TO LOCATION */}
-                            {(form.data.scan_type === 'check_in' || form.data.scan_type === 'transfer') && (
-                                <div>
-                                    <label className="label">To / Destination Location</label>
-                                    <select
-                                        className="input-field"
-                                        value={form.data.to_location_id}
-                                        onChange={(e) => {
-                                            const locId = e.target.value;
-                                            form.setData('to_location_id', locId);
-                                            setSelectedToLocation(locId);
-                                            // Auto-set the receiver to the barangay captain of the selected location
-                                            const loc = locations.find((l) => String(l.id) === locId);
-                                            form.setData('recipient_name', loc?.contact_person ?? '');
-                                        }}
-                                    >
-                                        <option value="">Select destination…</option>
-                                        {locations.map((l) => (
-                                            <option key={l.id} value={l.id}>{l.name}</option>
-                                        ))}
-                                    </select>
-                                    {form.errors.to_location_id && <p className="mt-1 text-xs text-red-600">{form.errors.to_location_id}</p>}
-                                </div>
-                            )}
-
-                            {/* BRGY. HEAD / RECEIVER */}
+                            {/* PUROK (read-only) */}
                             <div>
-                                <label className="label">
-                                    Brgy. Head / Receiver
-                                    {selectedToLocation && (
-                                        <span className="ml-1 text-xs font-normal text-slate-400">
-                                            — auto-filled from selected location
-                                        </span>
-                                    )}
-                                </label>
-                                <select
-                                    className="input-field"
-                                    value={form.data.recipient_name}
-                                    onChange={(e) => form.setData('recipient_name', e.target.value)}
-                                    disabled={!selectedToLocation}
-                                >
-                                    <option value="">
-                                        {selectedToLocation ? '— Select receiver —' : '— Select a destination location first —'}
-                                    </option>
-                                    {selectedToLocation && (() => {
-                                        const loc = locations.find((l) => String(l.id) === selectedToLocation);
-                                        return loc?.contact_person ? (
-                                            <option value={loc.contact_person}>
-                                                {loc.contact_person} (Brgy. Captain — {loc.name})
-                                            </option>
-                                        ) : null;
-                                    })()}
-                                </select>
-                                <p className="mt-1 text-xs text-slate-400">
-                                    The barangay captain of the destination location, set automatically when you pick a location.
-                                </p>
+                                <label className="label">Purok</label>
+                                <input
+                                    type="text"
+                                    className="input-field bg-slate-50"
+                                    value={purokName}
+                                    readOnly
+                                    placeholder="Auto-filled from selected family"
+                                />
+                            </div>
+
+                            {/* RELIEF (informational) */}
+                            <div>
+                                <label className="label">Relief / Resource</label>
+                                <input
+                                    type="text"
+                                    className="input-field bg-slate-50"
+                                    value=""
+                                    readOnly
+                                    placeholder="—"
+                                />
+                                <p className="mt-1 text-xs text-slate-400">Linked via family distribution record.</p>
                             </div>
 
                             {/* QUANTITY */}
@@ -435,20 +377,65 @@ export default function QrTracking({
                                 {form.errors.quantity_change && <p className="mt-1 text-xs text-red-600">{form.errors.quantity_change}</p>}
                             </div>
 
-                            {/* NOTES */}
+                            {/* SCAN STATUS TYPE */}
                             <div>
-                                <label className="label">Notes</label>
-                                <input
+                                <label className="label">Scan Status</label>
+                                <select
                                     className="input-field"
-                                    value={form.data.notes}
-                                    onChange={(e) => form.setData('notes', e.target.value)}
+                                    value={form.data.scan_type}
+                                    onChange={(e) => form.setData('scan_type', e.target.value)}
+                                >
+                                    <option value="check_in">Check In</option>
+                                    <option value="check_out">Check Out</option>
+                                    <option value="audit">Audit</option>
+                                    <option value="transfer">Transfer</option>
+                                </select>
+                            </div>
+
+                            {/* LOCATION */}
+                            <div>
+                                <label className="label">Location</label>
+                                <select
+                                    className="input-field"
+                                    value={form.data.location_id}
+                                    onChange={(e) => form.setData('location_id', e.target.value)}
+                                >
+                                    <option value="">Select location…</option>
+                                    {locations.map((l) => (
+                                        <option key={l.id} value={l.id}>{l.name}</option>
+                                    ))}
+                                </select>
+                                {form.errors.location_id && <p className="mt-1 text-xs text-red-600">{form.errors.location_id}</p>}
+                            </div>
+
+                            {/* DATE */}
+                            <div>
+                                <label className="label">Date</label>
+                                <input
+                                    type="date"
+                                    className="input-field"
+                                    value={form.data.scan_date}
+                                    onChange={(e) => form.setData('scan_date', e.target.value)}
                                 />
+                                {form.errors.scan_date && <p className="mt-1 text-xs text-red-600">{form.errors.scan_date}</p>}
+                            </div>
+
+                            {/* TIME */}
+                            <div>
+                                <label className="label">Time</label>
+                                <input
+                                    type="time"
+                                    className="input-field"
+                                    value={form.data.scan_time}
+                                    onChange={(e) => form.setData('scan_time', e.target.value)}
+                                />
+                                {form.errors.scan_time && <p className="mt-1 text-xs text-red-600">{form.errors.scan_time}</p>}
                             </div>
                         </div>
 
                         <div className="flex justify-end gap-2 pt-2">
                             <button type="button" className="btn-secondary" onClick={() => setShowScan(false)}>Cancel</button>
-                            <button type="submit" className="btn-primary" disabled={form.processing || !matched}>
+                            <button type="submit" className="btn-primary" disabled={form.processing}>
                                 {form.processing ? 'Recording…' : 'Record scan'}
                             </button>
                         </div>
@@ -461,7 +448,7 @@ export default function QrTracking({
                     open={!!deleting}
                     onClose={() => setDeleting(null)}
                     onConfirm={confirmDelete}
-                    message="Delete this scan record? This won't reverse any quantity change already applied."
+                    message="Delete this scan record?"
                 />
             )}
         </AppLayout>

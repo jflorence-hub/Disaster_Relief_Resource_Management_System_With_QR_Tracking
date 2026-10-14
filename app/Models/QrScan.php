@@ -14,6 +14,8 @@ class QrScan extends Model
         'resource_id',
         'destination_resource_id',
 
+        'family_id',
+
         'location_id',
         'from_location_id',
         'to_location_id',
@@ -25,13 +27,17 @@ class QrScan extends Model
         'quantity_change',
         'notes',
         'scanned_at',
+
+        'scan_date',
+        'scan_time',
     ];
 
     protected function casts(): array
     {
         return [
             'quantity_change' => 'integer',
-            'scanned_at' => 'datetime',
+            'scanned_at'      => 'datetime',
+            'scan_date'       => 'date',
         ];
     }
 
@@ -47,6 +53,13 @@ class QrScan extends Model
         return $this->belongsTo(
             Resource::class,
             'destination_resource_id'
+        );
+    }
+
+    public function family(): BelongsTo
+    {
+        return $this->belongsTo(
+            Family::class
         );
     }
 
