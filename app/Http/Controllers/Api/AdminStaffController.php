@@ -4,13 +4,15 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\StaffApprovalService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Str;
 
 class AdminStaffController extends Controller
 {
+    public function __construct(private StaffApprovalService $approvalService)
+    {
+    }
+
     /**
      * Return all staff users whose status is 'pending'.
      */
@@ -35,7 +37,7 @@ class AdminStaffController extends Controller
     }
 
     /**
-     * Approve a pending staff registration: set status to active and email a temp password.
+     * Approve a pending staff registration.
      */
     public function approveStaff(User $user): JsonResponse
     {
@@ -43,26 +45,13 @@ class AdminStaffController extends Controller
             return response()->json(['message' => 'This user is not pending approval.'], 400);
         }
 
-        $tempPassword    = Str::random(8);
-        $user->password  = $tempPassword; // cast will hash it
-        $user->status    = 'active';
-        $user->save();
-
-        Mail::raw(
-            "Congratulations {$user->name}, your registration has been approved.\n\n"
-            . "Your temporary password is: {$tempPassword}\n\n"
-            . "Please log in and change your password immediately.",
-            function ($message) use ($user) {
-                $message->to($user->email)
-                    ->subject('Staff Registration Approved — Disaster Relief System');
-            }
-        );
+        $this->approvalService->approve($user);
 
         return response()->json(['message' => 'Staff approved.']);
     }
 
     /**
-     * Reject a pending staff registration: delete the user and notify them by email.
+     * Reject a pending staff registration.
      */
     public function rejectStaff(User $user): JsonResponse
     {
@@ -70,20 +59,7 @@ class AdminStaffController extends Controller
             return response()->json(['message' => 'This user is not pending approval.'], 400);
         }
 
-        $email = $user->email;
-        $name  = $user->name;
-
-        Mail::raw(
-            "Dear {$name},\n\n"
-            . "We regret to inform you that your registration request was not approved. "
-            . "Please contact the administrator for more information.",
-            function ($message) use ($email) {
-                $message->to($email)
-                    ->subject('Staff Registration Update — Disaster Relief System');
-            }
-        );
-
-        $user->delete();
+        $this->approvalService->reject($user);
 
         return response()->json(['message' => 'Staff registration rejected.']);
     }

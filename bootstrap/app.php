@@ -33,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'auth.staff' => \App\Http\Middleware\EnsureStaffApiToken::class,
             'auth.admin' => \App\Http\Middleware\EnsureAdminApiToken::class,
             'auth.family' => \App\Http\Middleware\AuthenticateFamilyApiToken::class,
+            'must.change.password' => \App\Http\Middleware\EnsurePasswordChanged::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

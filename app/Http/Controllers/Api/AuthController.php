@@ -5,16 +5,22 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Purok;
 use App\Models\User;
+use App\Services\StaffApprovalService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
+    public function __construct(private StaffApprovalService $approvalService)
+    {
+    }
+
     /**
      * Issue a new API token for the mobile app after verifying credentials.
      */
@@ -77,6 +83,7 @@ class AuthController extends Controller
 
         $user->forceFill([
             'password' => $data['new_password'],
+            'must_change_password' => false,
         ])->save();
 
         return response()->json(['message' => 'Password reset successfully. Please log in with your new password.']);
@@ -93,7 +100,7 @@ class AuthController extends Controller
 
         $tempPassword = Hash::make(Str::random(16));
 
-        User::create([
+        $newStaff = User::create([
             'name'     => $validated['name'],
             'email'    => $validated['email'],
             'phone'    => $validated['phone'] ?? null,
@@ -103,22 +110,8 @@ class AuthController extends Controller
             'status'   => 'pending',
         ]);
 
-        $purokName = Purok::find($validated['purok_id'])?->name ?? 'N/A';
-        $admin = User::where('role', 'admin')->orderBy('id')->first();
-
-        if ($admin) {
-            Mail::raw(
-                "A new staff registration request has been submitted.\n\n"
-                . "Name:  {$validated['name']}\n"
-                . "Email: {$validated['email']}\n"
-                . "Phone: " . ($validated['phone'] ?? 'N/A') . "\n"
-                . "Purok: {$purokName}\n\n"
-                . "Please log in to the admin panel to approve or reject this request.",
-                function ($message) use ($admin) {
-                    $message->to($admin->email)->subject('New Staff Registration Request');
-                }
-            );
-        }
+        $newStaff->load('purok:id,name');
+        $this->approvalService->notifyAdmins($newStaff);
 
         return response()->json([
             'message' => 'Registration request submitted. You will receive an email once approved.',
@@ -144,9 +137,13 @@ class AuthController extends Controller
             'reset_code_expires_at' => $expiry,
         ])->save();
 
-        Mail::raw("Your OTP for password reset is: {$otp}\n\nThis code expires in 10 minutes.", function ($message) use ($user) {
-            $message->to($user->email)->subject('Password Reset OTP');
-        });
+        try {
+            Mail::raw("Your OTP for password reset is: {$otp}\n\nThis code expires in 10 minutes.", function ($message) use ($user) {
+                $message->to($user->email)->subject('Password Reset OTP');
+            });
+        } catch (\Exception $e) {
+            Log::error("Failed to send OTP email to {$user->email}: {$e->getMessage()}");
+        }
 
         return response()->json(['message' => 'If that email is registered, an OTP has been sent.']);
     }
@@ -186,15 +183,16 @@ class AuthController extends Controller
         $user->loadMissing(['location:id,name', 'purok:id,name']);
 
         return [
-            'id'          => $user->id,
-            'name'        => $user->name,
-            'email'       => $user->email,
-            'role'        => $user->role,
-            'status'      => $user->status,
-            'location_id' => $user->location_id,
-            'purok_id'    => $user->purok_id,
-            'location'    => $user->location ? ['id' => $user->location->id, 'name' => $user->location->name] : null,
-            'purok'       => $user->purok    ? ['id' => $user->purok->id,    'name' => $user->purok->name]    : null,
+            'id'                   => $user->id,
+            'name'                 => $user->name,
+            'email'                => $user->email,
+            'role'                 => $user->role,
+            'status'               => $user->status,
+            'must_change_password' => (bool) $user->must_change_password,
+            'location_id'          => $user->location_id,
+            'purok_id'             => $user->purok_id,
+            'location'             => $user->location ? ['id' => $user->location->id, 'name' => $user->location->name] : null,
+            'purok'                => $user->purok    ? ['id' => $user->purok->id,    'name' => $user->purok->name]    : null,
         ];
     }
 }

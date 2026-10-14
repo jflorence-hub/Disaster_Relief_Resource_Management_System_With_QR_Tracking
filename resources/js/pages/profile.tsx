@@ -1,14 +1,16 @@
 import AppLayout from '@/layouts/app-layout';
 import type { AuthUser } from '@/types/models';
 import { Head, router, useForm } from '@inertiajs/react';
-import { Camera, User } from 'lucide-react';
+import { AlertTriangle, Camera, KeyRound, User } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 interface ProfileUser extends AuthUser {
     avatar?: string | null;
+    avatar_url?: string | null;
     location?: { id: number; name: string } | null;
     purok?: { id: number; name: string } | null;
     staff_id?: string | null;
+    must_change_password?: boolean;
 }
 
 interface FormData {
@@ -17,9 +19,15 @@ interface FormData {
     phone: string;
 }
 
+interface PasswordFormData {
+    current_password: string;
+    password: string;
+    password_confirmation: string;
+}
+
 export default function Profile({ user }: { user: ProfileUser }) {
     const [avatarPreview, setAvatarPreview] = useState<string | null>(
-        user.avatar ? `/storage/${user.avatar}` : null,
+        user.avatar_url ?? (user.avatar ? `/storage/${user.avatar}` : null),
     );
     const fileRef = useRef<HTMLInputElement>(null);
 
@@ -29,10 +37,22 @@ export default function Profile({ user }: { user: ProfileUser }) {
         phone: user.phone ?? '',
     });
 
+    const passwordForm = useForm<PasswordFormData>({
+        current_password: '',
+        password: '',
+        password_confirmation: '',
+    });
+
     const submit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        form.post('/profile', {
+        form.post('/profile', { preserveScroll: true });
+    };
+
+    const submitPassword = (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        passwordForm.post('/profile/password', {
             preserveScroll: true,
+            onSuccess: () => passwordForm.reset(),
         });
     };
 
@@ -40,19 +60,18 @@ export default function Profile({ user }: { user: ProfileUser }) {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        // Local preview
         const reader = new FileReader();
         reader.onload = (ev) => setAvatarPreview(ev.target?.result as string);
         reader.readAsDataURL(file);
 
-        // Upload immediately
         router.post(
             '/profile/avatar',
             { avatar: file },
             {
                 forceFormData: true,
                 preserveScroll: true,
-                onError: () => setAvatarPreview(user.avatar ? `/storage/${user.avatar}` : null),
+                onError: () =>
+                    setAvatarPreview(user.avatar_url ?? (user.avatar ? `/storage/${user.avatar}` : null)),
             },
         );
     };
@@ -70,6 +89,16 @@ export default function Profile({ user }: { user: ProfileUser }) {
             <Head title="Profile" />
 
             <div className="mx-auto max-w-2xl space-y-6">
+                {/* TEMP PASSWORD BANNER */}
+                {user.must_change_password && (
+                    <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                        <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-600" />
+                        <p className="text-sm text-amber-800">
+                            You are using a temporary password. Please change it below before continuing.
+                        </p>
+                    </div>
+                )}
+
                 {/* AVATAR + IDENTITY CARD */}
                 <div className="card flex flex-col items-center gap-4 sm:flex-row sm:items-start sm:gap-6">
                     {/* Avatar */}
@@ -162,7 +191,6 @@ export default function Profile({ user }: { user: ProfileUser }) {
                     </div>
 
                     <form onSubmit={submit} className="space-y-4">
-                        {/* NAME */}
                         <div>
                             <label className="label">Full Name</label>
                             <input
@@ -177,7 +205,6 @@ export default function Profile({ user }: { user: ProfileUser }) {
                             )}
                         </div>
 
-                        {/* EMAIL */}
                         <div>
                             <label className="label">Email</label>
                             <input
@@ -192,7 +219,6 @@ export default function Profile({ user }: { user: ProfileUser }) {
                             )}
                         </div>
 
-                        {/* PHONE */}
                         <div>
                             <label className="label">Phone Number</label>
                             <input
@@ -210,12 +236,81 @@ export default function Profile({ user }: { user: ProfileUser }) {
                         </div>
 
                         <div className="flex justify-end pt-2">
+                            <button type="submit" className="btn-primary" disabled={form.processing}>
+                                {form.processing ? 'Saving…' : 'Save Changes'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                {/* CHANGE PASSWORD */}
+                <div className="card">
+                    <div className="mb-4 flex items-center gap-2">
+                        <KeyRound size={18} className="text-slate-500" />
+                        <h2 className="font-semibold text-slate-800">Change Password</h2>
+                    </div>
+
+                    <form onSubmit={submitPassword} className="space-y-4">
+                        <div>
+                            <label className="label">Current Password</label>
+                            <input
+                                type="password"
+                                className="input-field"
+                                value={passwordForm.data.current_password}
+                                onChange={(e) => passwordForm.setData('current_password', e.target.value)}
+                                autoComplete="current-password"
+                                required
+                            />
+                            {passwordForm.errors.current_password && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {passwordForm.errors.current_password}
+                                </p>
+                            )}
+                        </div>
+
+                        <div>
+                            <label className="label">New Password</label>
+                            <input
+                                type="password"
+                                className="input-field"
+                                value={passwordForm.data.password}
+                                onChange={(e) => passwordForm.setData('password', e.target.value)}
+                                autoComplete="new-password"
+                                minLength={8}
+                                required
+                            />
+                            <p className="mt-1 text-xs text-slate-400">At least 8 characters.</p>
+                            {passwordForm.errors.password && (
+                                <p className="mt-1 text-xs text-red-600">{passwordForm.errors.password}</p>
+                            )}
+                        </div>
+
+                        <div>
+                            <label className="label">Confirm New Password</label>
+                            <input
+                                type="password"
+                                className="input-field"
+                                value={passwordForm.data.password_confirmation}
+                                onChange={(e) =>
+                                    passwordForm.setData('password_confirmation', e.target.value)
+                                }
+                                autoComplete="new-password"
+                                required
+                            />
+                            {passwordForm.errors.password_confirmation && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {passwordForm.errors.password_confirmation}
+                                </p>
+                            )}
+                        </div>
+
+                        <div className="flex justify-end pt-2">
                             <button
                                 type="submit"
                                 className="btn-primary"
-                                disabled={form.processing}
+                                disabled={passwordForm.processing}
                             >
-                                {form.processing ? 'Saving…' : 'Save Changes'}
+                                {passwordForm.processing ? 'Changing…' : 'Change Password'}
                             </button>
                         </div>
                     </form>

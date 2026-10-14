@@ -51,7 +51,7 @@ Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])
     ->middleware('auth')
     ->name('logout');
 
-Route::middleware('auth')->group(function () {
+Route::middleware(['auth', 'must.change.password'])->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
     Route::get('messages', [StaffMessageController::class, 'index'])->name('messages.index');
     Route::post('messages', [StaffMessageController::class, 'store'])->name('messages.store');
@@ -64,6 +64,7 @@ Route::middleware('auth')->group(function () {
     Route::get('profile', [ProfileController::class, 'show'])->name('profile.show');
     Route::post('profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::post('profile/avatar', [ProfileController::class, 'uploadAvatar'])->name('profile.avatar');
+    Route::post('profile/password', [ProfileController::class, 'changePassword'])->name('profile.password');
 
     Route::resource('locations', LocationController::class)
         ->only(['index', 'store', 'update', 'destroy']);

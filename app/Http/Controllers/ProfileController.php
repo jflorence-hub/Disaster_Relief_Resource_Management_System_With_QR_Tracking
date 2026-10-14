@@ -20,20 +20,21 @@ class ProfileController extends Controller
 
         return Inertia::render('profile', [
             'user' => [
-                'id'          => $user->id,
-                'name'        => $user->name,
-                'email'       => $user->email,
-                'phone'       => $user->phone,
-                'role'        => $user->role,
-                'status'      => $user->status,
-                'avatar'      => $user->avatar,
-                'avatar_url'  => $user->avatar
+                'id'                   => $user->id,
+                'name'                 => $user->name,
+                'email'                => $user->email,
+                'phone'                => $user->phone,
+                'role'                 => $user->role,
+                'status'               => $user->status,
+                'must_change_password' => (bool) $user->must_change_password,
+                'avatar'               => $user->avatar,
+                'avatar_url'           => $user->avatar
                     ? Storage::disk('public')->url($user->avatar)
                     : null,
-                'location'    => $user->location
+                'location'             => $user->location
                     ? ['id' => $user->location->id, 'name' => $user->location->name]
                     : null,
-                'purok'       => $user->purok
+                'purok'                => $user->purok
                     ? ['id' => $user->purok->id, 'name' => $user->purok->name]
                     : null,
             ],
@@ -79,5 +80,26 @@ class ProfileController extends Controller
         $user->forceFill(['avatar' => $path])->save();
 
         return redirect()->back()->with('success', 'Profile picture updated successfully.');
+    }
+
+    /**
+     * Change the authenticated user's password.
+     * Clears the must_change_password flag on success.
+     */
+    public function changePassword(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'current_password'      => ['required', 'string', 'current_password'],
+            'password'              => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $user = $request->user();
+
+        $user->forceFill([
+            'password'             => $request->password,
+            'must_change_password' => false,
+        ])->save();
+
+        return redirect()->back()->with('success', 'Password changed successfully.');
     }
 }

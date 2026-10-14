@@ -4,17 +4,20 @@ namespace App\Http\Controllers;
 
 use App\Models\Location;
 use App\Models\User;
+use App\Services\StaffApprovalService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use App\Models\Purok;
 
 class TeamController extends Controller
 {
+    public function __construct(private StaffApprovalService $approvalService)
+    {
+    }
+
     public function index(Request $request): Response
     {
         $members = User::query()
@@ -112,37 +115,18 @@ class TeamController extends Controller
             return back()->with('error', 'This user is not pending approval.');
         }
 
-        $tempPassword = Str::random(8);
-        $user->forceFill([
-            'status' => 'active',
-            'password' => Hash::make($tempPassword),
-        ])->save();
-
-        Mail::raw(
-            "Congratulations {$user->name}, your registration has been approved. Your temporary password is: {$tempPassword}. Please log in and change your password immediately.",
-            function ($message) use ($user) {
-                $message->to($user->email)
-                    ->subject('Staff Registration Approved — Disaster Relief System');
-            }
-        );
+        $this->approvalService->approve($user);
 
         return back()->with('success', 'Staff member approved and notified.');
     }
 
     public function reject(User $user): RedirectResponse
     {
-        $name = $user->name;
-        $email = $user->email;
+        if ($user->status !== 'pending') {
+            return back()->with('error', 'This user is not pending approval.');
+        }
 
-        Mail::raw(
-            'We regret to inform you that your registration request was not approved. Please contact the administrator for more information.',
-            function ($message) use ($email, $name) {
-                $message->to($email)
-                    ->subject('Staff Registration Update — Disaster Relief System');
-            }
-        );
-
-        $user->delete();
+        $this->approvalService->reject($user);
 
         return back()->with('success', 'Registration request rejected.');
     }
