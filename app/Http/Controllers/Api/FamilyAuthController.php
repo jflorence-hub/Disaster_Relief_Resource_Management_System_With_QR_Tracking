@@ -29,24 +29,36 @@ class FamilyAuthController extends Controller
             'member_names.*' => 'required|string|max:255',
         ]);
 
-        // Check for duplicate member names (case-insensitive) against existing records.
-        foreach ($data['member_names'] as $name) {
-            $exists = \App\Models\HouseholdMember::whereRaw(
-                'LOWER(TRIM(name)) = ?',
-                [strtolower(trim($name))]
-            )->exists();
+        // Check head_name against existing Family heads (case-insensitive).
+        if (\App\Models\Family::whereRaw('LOWER(TRIM(head_name)) = ?', [strtolower(trim($data['head_name']))])->exists()) {
+            return response()->json(['message' => "A family headed by \"{$data['head_name']}\" is already registered."], 422);
+        }
 
-            if ($exists) {
-                return response()->json([
-                    'message' => "The name \"{$name}\" is already registered as a household member in another family.",
-                    'errors'  => ['member_names' => ["The name \"{$name}\" already exists in the system."]],
-                ], 422);
+        // Check head_name against existing HouseholdMember names (case-insensitive).
+        if (\App\Models\HouseholdMember::whereRaw('LOWER(TRIM(name)) = ?', [strtolower(trim($data['head_name']))])->exists()) {
+            return response()->json(['message' => "\"{$data['head_name']}\" is already a registered household member in another family."], 422);
+        }
+
+        // Check each member name against Family heads and HouseholdMember names (case-insensitive).
+        foreach ($data['member_names'] as $name) {
+            if (!$name || trim($name) === '') continue;
+
+            if (\App\Models\Family::whereRaw('LOWER(TRIM(head_name)) = ?', [strtolower(trim($name))])->exists()) {
+                return response()->json(['message' => "\"{$name}\" is already a head of family in a registered account."], 422);
+            }
+
+            if (\App\Models\HouseholdMember::whereRaw('LOWER(TRIM(name)) = ?', [strtolower(trim($name))])->exists()) {
+                return response()->json(['message' => "\"{$name}\" is already listed as a household member in another family. Each person belongs to one family only."], 422);
             }
         }
 
         $data['email'] = strtolower(trim($data['email']));
-        do { $familyId = 'FAM-' . strtoupper(Str::random(8)); }
-        while (Family::where('family_id', $familyId)->exists());
+        $maxId = (int) (Family::max('id') ?? 0);
+        $familyId = 'FAM-' . str_pad((string) ($maxId + 1), 4, '0', STR_PAD_LEFT);
+        while (Family::where('family_id', $familyId)->exists()) {
+            $maxId++;
+            $familyId = 'FAM-' . str_pad((string) $maxId, 4, '0', STR_PAD_LEFT);
+        }
 
         $family = Family::create([
             'family_name'      => $data['family_name'],

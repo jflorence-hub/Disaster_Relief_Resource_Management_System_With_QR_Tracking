@@ -231,7 +231,7 @@ class FamilyController extends Controller
              * saved with the family.
              */
             $family = Family::create($data);
-            $family->update(['family_id' => 'FAM-' . str_pad((string) $family->id, 6, '0', STR_PAD_LEFT)]);
+            $family->update(['family_id' => 'FAM-' . str_pad((string) $family->id, 4, '0', STR_PAD_LEFT)]);
 
             /*
              * Create beneficiaries.
