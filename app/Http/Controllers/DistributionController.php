@@ -371,7 +371,9 @@ class DistributionController extends Controller
                 'required',
                 'in:pending,in_transit,completed,cancelled',
             ],
-            'notes' => ['nullable', 'string'],
+            'notes'    => ['nullable', 'string'],
+            'reason'   => ['nullable', 'string'],
+            'disaster' => ['nullable', 'string', 'in:Typhoon,Flood,Earthquake,Fire,Drought,Landslide,Volcanic Eruption,Other'],
         ]);
 
         $family = Family::findOrFail($data['family_id']);
@@ -416,6 +418,8 @@ class DistributionController extends Controller
 
             $distribution->status = $data['status'];
             $distribution->notes = $data['notes'] ?? null;
+            $distribution->reason = $data['reason'] ?? null;
+            $distribution->disaster = $data['disaster'] ?? null;
 
             $distribution->save();
 
@@ -564,7 +568,9 @@ class DistributionController extends Controller
                 'required',
                 'in:pending,in_transit,completed,cancelled',
             ],
-            'notes' => ['nullable', 'string'],
+            'notes'    => ['nullable', 'string'],
+            'reason'   => ['nullable', 'string'],
+            'disaster' => ['nullable', 'string', 'in:Typhoon,Flood,Earthquake,Fire,Drought,Landslide,Volcanic Eruption,Other'],
         ]);
     }
 

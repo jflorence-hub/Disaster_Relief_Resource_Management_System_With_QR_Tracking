@@ -3,9 +3,11 @@
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Auth\PasswordRecoveryController;
+use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DistributionController;
 use App\Http\Controllers\LocationController;
+use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QrTrackingController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\ResourceController;
@@ -53,6 +55,15 @@ Route::middleware('auth')->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
     Route::get('messages', [StaffMessageController::class, 'index'])->name('messages.index');
     Route::post('messages', [StaffMessageController::class, 'store'])->name('messages.store');
+
+    // Announcements
+    Route::get('announcements', [AnnouncementController::class, 'index'])->name('announcements.index');
+    Route::post('announcements', [AnnouncementController::class, 'store'])->name('announcements.store');
+
+    // Profile
+    Route::get('profile', [ProfileController::class, 'show'])->name('profile.show');
+    Route::post('profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::post('profile/avatar', [ProfileController::class, 'uploadAvatar'])->name('profile.avatar');
 
     Route::resource('locations', LocationController::class)
         ->only(['index', 'store', 'update', 'destroy']);

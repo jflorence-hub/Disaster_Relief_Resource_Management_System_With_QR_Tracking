@@ -1,11 +1,13 @@
 <?php
 
+use App\Http\Controllers\Api\AnnouncementController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DistributionController;
 use App\Http\Controllers\Api\FamilyAuthController;
 use App\Http\Controllers\Api\FamilyDistributionController;
 use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\FamilyMessageController;
+use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\QrTrackingController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ResourceController;
@@ -19,6 +21,7 @@ Route::post('register', [AuthController::class, 'register']);
 // Password reset
 Route::post('password/forgot', [AuthController::class, 'forgotPassword']);
 Route::post('password/verify-otp', [AuthController::class, 'verifyOtp']);
+Route::post('password/reset', [AuthController::class, 'resetPassword']);
 
 // Public authentication routes
 Route::post('login', [AuthController::class, 'login']);
@@ -43,6 +46,7 @@ Route::middleware(['auth.token', 'auth.staff'])->group(function () {
     Route::get('distributions/history', [DistributionController::class, 'history']);
     Route::post('distributions/lookup', [DistributionController::class, 'lookup']);
     Route::post('distributions/confirm', [DistributionController::class, 'confirm']);
+    Route::post('distributions/lookup-by-qr', [DistributionController::class, 'lookupByQr']);
 
     // QR tracking
     Route::post('qr/lookup', [QrTrackingController::class, 'lookup']);
@@ -58,6 +62,13 @@ Route::middleware(['auth.token', 'auth.staff'])->group(function () {
     // Staff messages
     Route::get('messages', [StaffMessageController::class, 'index']);
     Route::post('messages', [StaffMessageController::class, 'store']);
+
+    // Announcements for staff
+    Route::get('announcements', [AnnouncementController::class, 'staffIndex']);
+
+    // Profile
+    Route::patch('profile', [ProfileController::class, 'update']);
+    Route::post('profile/avatar', [ProfileController::class, 'uploadAvatar']);
 });
 
 // Family API routes
@@ -70,4 +81,7 @@ Route::middleware('auth.family')->group(function () {
 
     Route::get('family/distributions', [FamilyDistributionController::class, 'index']);
     Route::post('family/distributions/{item}/confirm', [FamilyDistributionController::class, 'confirm']);
+
+    // Announcements for family/household
+    Route::get('family/announcements', [AnnouncementController::class, 'familyIndex']);
 });

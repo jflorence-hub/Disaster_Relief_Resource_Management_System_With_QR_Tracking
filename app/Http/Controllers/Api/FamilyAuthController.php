@@ -19,7 +19,7 @@ class FamilyAuthController extends Controller
             'family_name' => 'required|string|max:255',
             'head_name' => 'required|string|max:255',
             'email' => 'required|email|max:255|unique:families,email',
-            'phone' => 'required|string|max:50|unique:families,phone',
+            'phone' => 'required|string|max:50|regex:/^09[0-9]{9}$/|unique:families,phone',
             'address' => 'required|string|max:2000',
             'household_member' => 'required|integer|min:1|max:100',
             'purok_id' => 'required|exists:puroks,id',

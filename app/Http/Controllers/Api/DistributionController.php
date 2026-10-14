@@ -10,9 +10,42 @@ use Illuminate\Support\Facades\DB;
 
 class DistributionController extends Controller
 {
-   /**
- * Return completed family relief distributions for scanner history.
- */
+    /**
+     * Look up a distribution record by QR code and return the associated
+     * family details for the scan confirmation form.
+     */
+    public function lookupByQr(Request $request): JsonResponse
+    {
+        $request->validate(['qr_code' => 'required|string']);
+
+        $distribution = Distribution::with([
+            'resource:id,name,unit',
+            'additionalResource:id,name,unit',
+            'location:id,name',
+            'family:id,family_id,family_name,head_name,phone,household_member,purok_id,location_id',
+            'family.purok:id,name',
+            'family.location:id,name',
+        ])
+            ->where('qr_code', trim($request->string('qr_code')))
+            ->first();
+
+        if (! $distribution) {
+            return response()->json([
+                'found'   => false,
+                'message' => 'No family found for QR code.',
+            ], 404);
+        }
+
+        return response()->json([
+            'found'        => true,
+            'distribution' => $distribution,
+            'family'       => $distribution->family,
+        ]);
+    }
+
+    /**
+     * Return completed family relief distributions for scanner history.
+     */
 public function history(): JsonResponse
 {
     $distributions = Distribution::with([

@@ -24,6 +24,8 @@ class Distribution extends Model
         'distribution_date',
         'status',
         'notes',
+        'reason',
+        'disaster',
         'family_id',
         'schedule_id',
     ];

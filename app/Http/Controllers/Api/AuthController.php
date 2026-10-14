@@ -61,12 +61,32 @@ class AuthController extends Controller
         return response()->json(['message' => 'Logged out.']);
     }
 
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'email'                 => 'required|email',
+            'new_password'          => 'required|string|min:8|confirmed',
+        ]);
+
+        $user = User::where('email', $data['email'])->first();
+
+        if (! $user) {
+            return response()->json(['message' => 'No account found with that email address.'], 404);
+        }
+
+        $user->forceFill([
+            'password' => $data['new_password'],
+        ])->save();
+
+        return response()->json(['message' => 'Password reset successfully. Please log in with your new password.']);
+    }
+
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'name'                  => 'required|string|max:255',
             'email'                 => 'required|email|unique:users,email',
-            'phone'                 => 'nullable|string|max:20',
+            'phone'                 => ['nullable', 'regex:/^09[0-9]{9}$/'],
             'password'              => 'required|string|min:8|confirmed',
         ]);
 
@@ -142,14 +162,18 @@ class AuthController extends Controller
 
     private function userPayload($user): array
     {
+        $user->loadMissing(['location:id,name', 'purok:id,name']);
+
         return [
-            'id' => $user->id,
-            'name' => $user->name,
-            'email' => $user->email,
-            'role' => $user->role,
-            'status' => $user->status,
+            'id'          => $user->id,
+            'name'        => $user->name,
+            'email'       => $user->email,
+            'role'        => $user->role,
+            'status'      => $user->status,
             'location_id' => $user->location_id,
-            'purok_id' => $user->purok_id,
+            'purok_id'    => $user->purok_id,
+            'location'    => $user->location ? ['id' => $user->location->id, 'name' => $user->location->name] : null,
+            'purok'       => $user->purok    ? ['id' => $user->purok->id,    'name' => $user->purok->name]    : null,
         ];
     }
 }

@@ -53,6 +53,7 @@ class DashboardController extends Controller
                 'location' => $user->location?->name,
                 'hasPurok' => $user->purok_id !== null,
                 'purok' => $user->purok?->name,
+                'handler' => $user->name,
             ],
         ]);
     }
