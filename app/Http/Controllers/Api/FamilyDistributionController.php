@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Distribution;
+use App\Models\QrScan;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -23,6 +24,23 @@ class FamilyDistributionController extends Controller
             ->where('family_id', $family->id)
             ->orderByDesc('distribution_date')
             ->get();
+
+        // Enrich each distribution with the receiver from the linked QR scan
+        $distributions->each(function (Distribution $d) {
+            if ($d->qr_code) {
+                $scan = \App\Models\QrScan::where(function ($q) use ($d) {
+                    $q->where('family_id', $d->family_id)
+                      ->whereNotNull('receiver');
+                })
+                ->orderByDesc('scanned_at')
+                ->first(['receiver', 'scanned_at']);
+
+                if ($scan && $scan->receiver) {
+                    $d->claimed_by = $scan->receiver;
+                }
+            }
+            // Fallback: if claimed_by is still empty, use the head of family (set at distribution level)
+        });
 
         $householdMembers = $family->household_member()
             ->orderBy('household_member_number')
