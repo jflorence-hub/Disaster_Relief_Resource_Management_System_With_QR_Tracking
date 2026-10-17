@@ -5,36 +5,42 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Announcement;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AnnouncementController extends Controller
 {
     /**
-     * Announcements intended for staff.
+     * Announcements for staff: returns 'staff' and 'everyone' audience rows.
      */
-    public function staffIndex(): JsonResponse
+    public function staffIndex(Request $request): JsonResponse
     {
         $announcements = Announcement::with('sender:id,name')
-            ->where('audience', 'staff')
+            ->whereIn('audience', ['staff', 'everyone'])
             ->orderByDesc('created_at')
             ->get();
 
-        return response()->json([
-            'announcements' => $announcements,
-        ]);
+        return response()->json(['announcements' => $announcements]);
     }
 
     /**
-     * Announcements intended for family/household accounts.
+     * Announcements for family/household accounts.
+     * Returns 'family' and 'everyone' rows, plus 'barangay' rows scoped to the
+     * family's registered location.
      */
-    public function familyIndex(): JsonResponse
+    public function familyIndex(Request $request): JsonResponse
     {
-        $announcements = Announcement::with('sender:id,name')
-            ->where('audience', 'family')
-            ->orderByDesc('created_at')
-            ->get();
+        $family = $request->user();
 
-        return response()->json([
-            'announcements' => $announcements,
-        ]);
+        $query = Announcement::with('sender:id,name')
+            ->where(function ($q) use ($family) {
+                $q->whereIn('audience', ['family', 'everyone'])
+                  ->orWhere(function ($inner) use ($family) {
+                      $inner->where('audience', 'barangay')
+                            ->where('location_id', $family?->location_id);
+                  });
+            })
+            ->orderByDesc('created_at');
+
+        return response()->json(['announcements' => $query->get()]);
     }
 }

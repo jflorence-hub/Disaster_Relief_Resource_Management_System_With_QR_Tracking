@@ -14,6 +14,7 @@ class Announcement extends Model
         'title',
         'body',
         'audience',
+        'location_id',
         'sent_by',
     ];
 
@@ -23,5 +24,13 @@ class Announcement extends Model
     public function sender(): BelongsTo
     {
         return $this->belongsTo(User::class, 'sent_by');
+    }
+
+    /**
+     * The barangay this announcement is targeted at (audience = barangay only).
+     */
+    public function location(): BelongsTo
+    {
+        return $this->belongsTo(Location::class);
     }
 }

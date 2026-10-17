@@ -1,13 +1,12 @@
 import AppLayout from '@/layouts/app-layout';
 import ConfirmDialog from '@/components/confirm-dialog';
 import Modal from '@/components/modal';
-import { Distribution, Location, ResourceItem } from '@/types/models';
+import { Distribution, DistributionItem, Location, ResourceItem, ResourceSet, StockWarning } from '@/types/models';
 import { Head, router, useForm } from '@inertiajs/react';
 import {
     CheckCircle2,
     Clock3,
     Download,
-    History,
     Pencil,
     QrCode,
     Search,
@@ -50,29 +49,6 @@ interface DistributionRow {
     status: string;
 }
 
-interface ScheduleHistoryEntry {
-    id: number;
-    scheduled_at: string;
-    resource_name: string | null;
-    location_name: string | null;
-    families: {
-        id: number;
-        status: string;
-        quantity: number;
-        additional_quantity: number | null;
-        family_code: string;
-        family_name: string;
-        head_name: string;
-        household_member: number;
-        purok_name: string | null;
-        resource_name: string | null;
-        resource_unit: string | null;
-        additional_resource_name: string | null;
-        additional_resource_unit: string | null;
-        scanned_by: string | null;
-    }[];
-}
-
 interface FormData {
     family_id: number | string;
     resource_id: number | string;
@@ -85,6 +61,9 @@ interface FormData {
     notes: string;
     reason: string;
     disaster: string;
+    assignment_mode: 'set' | 'individual' | '';
+    resource_set_id: number | string;
+    items: { resource_id: number | string; quantity: number | string }[];
 }
 
 const emptyForm: FormData = {
@@ -99,6 +78,9 @@ const emptyForm: FormData = {
     notes: '',
     reason: '',
     disaster: '',
+    assignment_mode: '',
+    resource_set_id: '',
+    items: [],
 };
 
 // Keep in sync with ResourceController::DISASTER_TYPES
@@ -124,8 +106,8 @@ export default function DistributionPage({
     scheduledAt,
     defaultSetResource,
     userRole,
-    scheduleHistory = [],
-    puroks = [],
+    allLocations = [],
+    resourceSets = [],
 }: {
     distributions: Distribution[];
     resources: ResourceItem[];
@@ -133,23 +115,20 @@ export default function DistributionPage({
     filters: {
         search?: string;
         status?: string;
+        location_id?: string;
     };
     staff: Staff[];
     families: Family[];
     currentDate: string;
     scheduledAt: string;
     defaultSetResource?: ResourceItem | null;
-    userRole: string;
-    scheduleHistory: ScheduleHistoryEntry[];
-    puroks: { id: number; name: string }[];
+    userRole: string;    allLocations?: { id: number; name: string }[];
+    resourceSets?: ResourceSet[];
 }) {
     const [search, setSearch] = useState(filters.search ?? '');
     const [selectedStaffId, setSelectedStaffId] = useState('');
-
-    // History dropdown — which past schedule is being viewed
-    const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(null);
-    // History purok filter — which purok to show inside the selected schedule
-    const [selectedHistoryPurok, setSelectedHistoryPurok] = useState<string>('');
+    const [filterLocationId, setFilterLocationId] = useState(filters.location_id ?? '');
+    const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'pending' | 'completed' | 'excluded'>('all');
 
     const [scheduleValue, setScheduleValue] = useState(
         scheduledAt || currentDate,
@@ -192,6 +171,14 @@ export default function DistributionPage({
     const [deleting, setDeleting] = useState<Distribution | null>(null);
 
     // ============================================================
+    // EXCLUSION STATE
+    // ============================================================
+
+    const [excludingDistribution, setExcludingDistribution] = useState<Distribution | null>(null);
+    const [excludeReason, setExcludeReason] = useState('');
+    const [excludeError, setExcludeError] = useState('');
+
+    // ============================================================
     // QR STATE
     // ============================================================
 
@@ -202,6 +189,10 @@ export default function DistributionPage({
     const qrRef = useRef<HTMLDivElement>(null);
 
     const form = useForm<FormData>(emptyForm);
+
+    const [stockWarnings, setStockWarnings] = useState<StockWarning[]>([]);
+    const [stockCheckLoading, setStockCheckLoading] = useState(false);
+    const [stockOk, setStockOk] = useState(false);
 
     // ============================================================
     // BUILD DISTRIBUTION ROWS
@@ -279,6 +270,22 @@ export default function DistributionPage({
     }, [families, distributions, resources]);
 
     // ============================================================
+    // BARANGAY FILTER — now handled server-side via Inertia visit
+    // ============================================================
+
+    const handleLocationChange = (locationId: string) => {
+        setFilterLocationId(locationId);
+        router.visit('/distribution', {
+            data: {
+                search: search || undefined,
+                location_id: locationId || undefined,
+            },
+            preserveState: true,
+            replace: true,
+        });
+    };
+
+    // ============================================================
     // STAFF / PUROK FILTER
     // ============================================================
 
@@ -324,6 +331,21 @@ export default function DistributionPage({
         });
     }, [search, filteredByStaff]);
 
+    const tabFilteredRows = useMemo(() => {
+        switch (activeStatusTab) {
+            case 'pending':
+                return filteredRows.filter(
+                    (row) => row.distribution.status === 'pending' && !row.distribution.excluded
+                );
+            case 'completed':
+                return filteredRows.filter((row) => row.distribution.status === 'completed');
+            case 'excluded':
+                return filteredRows.filter((row) => row.distribution.excluded === true);
+            default:
+                return filteredRows;
+        }
+    }, [filteredRows, activeStatusTab]);
+
     // ============================================================
     // STATUS
     // ============================================================
@@ -345,6 +367,23 @@ export default function DistributionPage({
             default:
                 return 'badge-slate';
         }
+    };
+
+    const renderStatusBadge = (distribution: Distribution) => {
+        if (distribution.excluded) {
+            return (
+                <div>
+                    <span className="badge-red">Excluded</span>
+                    {distribution.exclusion_reason && (
+                        <p className="text-xs text-gray-500 mt-0.5 truncate max-w-[180px]"
+                           title={distribution.exclusion_reason}>
+                            {distribution.exclusion_reason}
+                        </p>
+                    )}
+                </div>
+            );
+        }
+        return <span className={getStatusClass(distribution.status)}>{distribution.status}</span>;
     };
 
     // ============================================================
@@ -410,7 +449,27 @@ export default function DistributionPage({
             reason: (distribution as Distribution & { reason?: string }).reason ?? '',
 
             disaster: (distribution as Distribution & { disaster?: string }).disaster ?? '',
+
+            assignment_mode: (distribution.assignment_mode as 'set' | 'individual' | '') ?? '',
+
+            resource_set_id: distribution.resource_set_id ?? '',
+
+            items: distribution.items?.map((i: DistributionItem) => ({
+                resource_id: i.resource_id,
+                quantity: i.quantity,
+            })) ?? [],
         });
+
+        setStockWarnings([]);
+        setStockOk(false);
+
+        if (distribution.assignment_mode === 'set' && distribution.resource_set_id) {
+            runStockCheck('set', distribution.resource_set_id, undefined, distribution.location_id ?? undefined);
+        } else if (distribution.assignment_mode === 'individual' && distribution.items?.length) {
+            runStockCheck('individual', undefined, distribution.items.map((i: DistributionItem) => ({
+                resource_id: i.resource_id, quantity: i.quantity,
+            })), distribution.location_id ?? undefined);
+        }
     };
 
     // ============================================================
@@ -458,6 +517,19 @@ export default function DistributionPage({
             reason: form.data.reason || null,
 
             disaster: form.data.disaster || null,
+
+            assignment_mode: form.data.assignment_mode || null,
+
+            resource_set_id: form.data.assignment_mode === 'set' && form.data.resource_set_id
+                ? Number(form.data.resource_set_id)
+                : null,
+
+            items: form.data.assignment_mode === 'individual'
+                ? form.data.items.map((i) => ({
+                      resource_id: Number(i.resource_id),
+                      quantity: Number(i.quantity),
+                  }))
+                : [],
         };
 
         console.log('UPDATING DISTRIBUTION:', editingDistribution.id);
@@ -491,6 +563,50 @@ export default function DistributionPage({
                 console.log('UPDATE REQUEST FINISHED');
             },
         });
+    };
+
+    // ============================================================
+    // EXCLUSION HANDLERS
+    // ============================================================
+
+    const openExcludeModal = (distribution: Distribution) => {
+        setExcludingDistribution(distribution);
+        setExcludeReason('');
+        setExcludeError('');
+    };
+
+    const handleExcludeConfirm = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!excludingDistribution) return;
+
+        router.post(
+            `/distribution/${excludingDistribution.id}/exclude`,
+            { reason: excludeReason || null },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setExcludingDistribution(null);
+                    setExcludeReason('');
+                    setExcludeError('');
+                },
+                onError: (errors) => {
+                    setExcludeError(errors.exclude ?? 'An error occurred.');
+                },
+            }
+        );
+    };
+
+    const handleInclude = (distribution: Distribution) => {
+        router.post(
+            `/distribution/${distribution.id}/include`,
+            {},
+            {
+                preserveScroll: true,
+                onError: (errors) => {
+                    console.error('Include error:', errors);
+                },
+            }
+        );
     };
 
     // ============================================================
@@ -544,6 +660,48 @@ export default function DistributionPage({
     };
 
     // ============================================================
+    // STOCK CHECK
+    // ============================================================
+
+    const runStockCheck = async (
+        mode: 'set' | 'individual',
+        resourceSetId?: number | string,
+        items?: { resource_id: number | string; quantity: number | string }[],
+        locationId?: number | string,
+    ) => {
+        setStockCheckLoading(true);
+        setStockWarnings([]);
+        setStockOk(false);
+
+        try {
+            const body: Record<string, unknown> = { assignment_mode: mode };
+            if (mode === 'set') body.resource_set_id = resourceSetId;
+            if (mode === 'individual') body.items = items;
+            if (locationId) body.location_id = locationId;
+
+            const csrfMeta = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]');
+            const response = await fetch('/distribution/check-stock', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfMeta?.content ?? '',
+                },
+                body: JSON.stringify(body),
+            });
+
+            if (response.ok) {
+                const json = await response.json() as { warnings: StockWarning[] };
+                setStockWarnings(json.warnings);
+                setStockOk(json.warnings.length === 0);
+            }
+        } catch {
+            // fail silently — stock check is informational only
+        } finally {
+            setStockCheckLoading(false);
+        }
+    };
+
+    // ============================================================
     // RENDER
     // ============================================================
 
@@ -554,200 +712,6 @@ export default function DistributionPage({
         >
             <Head title="Distribution" />
 
-            {/* ── DISTRIBUTION HISTORY DROPDOWN ── */}
-            <div className="card mb-5">
-                <div className="flex items-center gap-2 mb-3">
-                    <History size={17} className="text-slate-500" />
-                    <h2 className="font-semibold text-slate-800">Distribution History</h2>
-                </div>
-                <p className="mb-3 text-xs text-slate-500">
-                    Select a past distribution schedule to see which families received relief and their status.
-                </p>
-                <select
-                    className="input-field w-full"
-                    value={selectedScheduleId ?? ''}
-                    onChange={(e) => {
-                        setSelectedScheduleId(e.target.value ? Number(e.target.value) : null);
-                        setSelectedHistoryPurok('');
-                    }}
-                >
-                    <option value="">— Select a distribution schedule —</option>
-                    {scheduleHistory.map((s) => (
-                        <option key={s.id} value={s.id}>
-                            {new Date(s.scheduled_at).toLocaleString('en-US', {
-                                year: 'numeric',
-                                month: 'short',
-                                day: 'numeric',
-                                hour: 'numeric',
-                                minute: '2-digit',
-                            })}
-                            {s.resource_name ? ` — ${s.resource_name}` : ''}
-                            {s.location_name ? ` @ ${s.location_name}` : ''}
-                        </option>
-                    ))}
-                </select>
-
-                {/* HISTORY TABLE */}
-                {selectedScheduleId !== null && (() => {
-                    const schedule = scheduleHistory.find((s) => s.id === selectedScheduleId);
-                    if (!schedule) return null;
-
-                    // Apply purok filter (admin can choose; staff always sees only their own)
-                    const visibleFamilies = selectedHistoryPurok
-                        ? schedule.families.filter((f) => f.purok_name === selectedHistoryPurok)
-                        : schedule.families;
-
-                    const completedCount = visibleFamilies.filter((f) => f.status === 'completed').length;
-                    const pendingCount   = visibleFamilies.filter((f) => f.status === 'pending').length;
-                    const cancelledCount = visibleFamilies.filter((f) => f.status === 'cancelled').length;
-
-                    return (
-                        <div className="mt-4">
-                            {/* Schedule meta — header row with purok dropdown on the right */}
-                            <div className="mb-3 flex flex-wrap items-start justify-between gap-3 rounded-lg bg-slate-50 px-4 py-3 text-sm">
-                                {/* Left: stat chips */}
-                                <div className="flex flex-wrap gap-4">
-                                    {/* Date & Time */}
-                                    <div>
-                                        <span className="text-xs font-medium uppercase text-slate-400">Date &amp; Time</span>
-                                        <p className="font-medium text-slate-800">
-                                            {new Date(schedule.scheduled_at).toLocaleString('en-US', {
-                                                year: 'numeric',
-                                                month: 'long',
-                                                day: 'numeric',
-                                                hour: 'numeric',
-                                                minute: '2-digit',
-                                            })}
-                                        </p>
-                                    </div>
-
-                                    {/* Location — always shown beside date */}
-                                    <div>
-                                        <span className="text-xs font-medium uppercase text-slate-400">Location</span>
-                                        <p className="font-medium text-slate-800">
-                                            {schedule.location_name ?? <span className="font-normal text-slate-400">—</span>}
-                                        </p>
-                                    </div>
-
-                                    {schedule.resource_name && (
-                                        <div>
-                                            <span className="text-xs font-medium uppercase text-slate-400">Relief</span>
-                                            <p className="font-medium text-slate-800">{schedule.resource_name}</p>
-                                        </div>
-                                    )}
-
-                                    {/* Counts (reflect the filtered set) */}
-                                    <div>
-                                        <span className="text-xs font-medium uppercase text-slate-400">Families</span>
-                                        <p className="font-medium text-slate-800">{visibleFamilies.length}</p>
-                                    </div>
-                                    <div>
-                                        <span className="text-xs font-medium uppercase text-slate-400">Completed</span>
-                                        <p className="font-medium text-green-700">{completedCount}</p>
-                                    </div>
-                                    <div>
-                                        <span className="text-xs font-medium uppercase text-slate-400">Pending</span>
-                                        <p className="font-medium text-amber-600">{pendingCount}</p>
-                                    </div>
-                                    <div>
-                                        <span className="text-xs font-medium uppercase text-slate-400">Cancelled</span>
-                                        <p className="font-medium text-red-600">{cancelledCount}</p>
-                                    </div>
-                                </div>
-
-                                {/* Right: Purok filter dropdown (admin sees all puroks; staff has only theirs) */}
-                                {userRole === 'admin' && (
-                                    <div className="flex flex-col gap-1">
-                                        <span className="text-xs font-medium uppercase text-slate-400">Filter by Purok</span>
-                                        <select
-                                            className="input-field min-w-[180px]"
-                                            value={selectedHistoryPurok}
-                                            onChange={(e) => setSelectedHistoryPurok(e.target.value)}
-                                        >
-                                            <option value="">All Puroks</option>
-                                            {puroks.map((p) => (
-                                                <option key={p.id} value={p.name}>
-                                                    {p.name}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
-                            </div>
-
-                            {visibleFamilies.length === 0 ? (
-                                <p className="py-6 text-center text-sm text-slate-400">
-                                    No families found{selectedHistoryPurok ? ` in ${selectedHistoryPurok}` : ''} for this schedule.
-                                </p>
-                            ) : (
-                                <div className="overflow-x-auto rounded-lg border border-slate-100">
-                                    <table className="w-full text-sm">
-                                        <thead>
-                                            <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase text-slate-500">
-                                                <th className="px-4 py-2">Family</th>
-                                                <th className="px-4 py-2">Purok</th>
-                                                <th className="px-4 py-2">Family Head</th>
-                                                <th className="px-4 py-2">Members</th>
-                                                <th className="px-4 py-2">Relief</th>
-                                                <th className="px-4 py-2">Scanned By</th>
-                                                <th className="px-4 py-2">Status</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {visibleFamilies.map((f) => (
-                                                <tr key={f.id} className="border-b border-slate-50 hover:bg-slate-50">
-                                                    <td className="px-4 py-2.5">
-                                                        <p className="font-medium text-slate-800">{f.family_name}</p>
-                                                        <p className="text-xs text-slate-400">{f.family_code}</p>
-                                                    </td>
-                                                    <td className="px-4 py-2.5 text-slate-600">
-                                                        {f.purok_name ?? <span className="text-slate-300">—</span>}
-                                                    </td>
-                                                    <td className="px-4 py-2.5 text-slate-600">{f.head_name}</td>
-                                                    <td className="px-4 py-2.5 text-slate-600">{f.household_member}</td>
-
-                                                    {/* RELIEF */}
-                                                    <td className="px-4 py-2.5 text-slate-600">
-                                                        {f.resource_name ? (
-                                                            <div>
-                                                                <p>
-                                                                    {f.quantity}&nbsp;
-                                                                    <span className="text-xs text-slate-400">{f.resource_unit}</span>
-                                                                    &nbsp;{f.resource_name}
-                                                                </p>
-                                                                {f.additional_resource_name && (
-                                                                    <p className="text-xs text-purple-600">
-                                                                        +{f.additional_quantity ?? 0}&nbsp;
-                                                                        <span className="text-slate-400">{f.additional_resource_unit}</span>
-                                                                        &nbsp;{f.additional_resource_name}
-                                                                    </p>
-                                                                )}
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-slate-300">—</span>
-                                                        )}
-                                                    </td>
-
-                                                    {/* SCANNED BY */}
-                                                    <td className="px-4 py-2.5 text-slate-600">
-                                                        {f.scanned_by ?? <span className="text-slate-300">—</span>}
-                                                    </td>
-
-                                                    <td className="px-4 py-2.5">
-                                                        <span className={`badge ${getStatusClass(f.status)} capitalize`}>
-                                                            {f.status.replace('_', ' ')}
-                                                        </span>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
-                    );
-                })()}
-            </div>
 
             {/* ── SUMMARY — visible to both roles ── */}
             <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">                <div className="card flex items-center gap-4">
@@ -810,6 +774,19 @@ export default function DistributionPage({
                     />
                 </div>
 
+                {userRole === 'admin' && allLocations.length > 0 && (
+                    <select
+                        className="input-field sm:w-44"
+                        value={filterLocationId}
+                        onChange={(e) => handleLocationChange(e.target.value)}
+                    >
+                        <option value="">All Barangays</option>
+                        {allLocations.map((l) => (
+                            <option key={l.id} value={String(l.id)}>{l.name}</option>
+                        ))}
+                    </select>
+                )}
+
                 {userRole === 'admin' && (
                     <select
                         className="input-field sm:w-56"
@@ -828,6 +805,31 @@ export default function DistributionPage({
                         ))}
                     </select>
                 )}
+            </div>
+
+            {/* STATUS FILTER TABS */}
+            <div className="flex flex-wrap gap-1 mt-3 mb-2">
+              {(['all', 'pending', 'completed', 'excluded'] as const).map((tab) => {
+                const counts = {
+                  all:       filteredRows.length,
+                  pending:   filteredRows.filter(r => r.distribution.status === 'pending' && !r.distribution.excluded).length,
+                  completed: filteredRows.filter(r => r.distribution.status === 'completed').length,
+                  excluded:  filteredRows.filter(r => r.distribution.excluded === true).length,
+                };
+                const label = { all: 'All', pending: 'Pending', completed: 'Completed', excluded: 'Excluded' };
+                const isActive = activeStatusTab === tab;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveStatusTab(tab)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                      isActive ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {label[tab]} <span className="ml-1 opacity-75">{counts[tab]}</span>
+                  </button>
+                );
+              })}
             </div>
 
             {/* SCHEDULE FORM — admin only */}
@@ -964,8 +966,6 @@ export default function DistributionPage({
 
                             <th className="px-4 py-3">Qty</th>
 
-                            <th className="px-4 py-3">Scanned By</th>
-
                             <th className="px-4 py-3">Status</th>
 
                             <th className="px-4 py-3 text-right">Actions</th>
@@ -973,10 +973,10 @@ export default function DistributionPage({
                     </thead>
 
                     <tbody>
-                        {filteredRows.length === 0 && (
+                        {tabFilteredRows.length === 0 && (
                             <tr>
                                 <td
-                                    colSpan={8}
+                                    colSpan={7}
                                     className="px-4 py-12 text-center text-slate-400"
                                 >
                                     No families found.
@@ -984,7 +984,7 @@ export default function DistributionPage({
                             </tr>
                         )}
 
-                        {filteredRows.map((row) => (
+                        {tabFilteredRows.map((row) => (
                             <tr
                                 key={row.distribution.id}
                                 className="border-b border-slate-50 hover:bg-slate-50"
@@ -1062,22 +1062,10 @@ export default function DistributionPage({
                                     )}
                                 </td>
 
-                                {/* SCANNED BY */}
-
-                                <td className="px-4 py-3 text-slate-500">
-                                    {row.distribution.distributor?.name ?? <span className="text-slate-300">—</span>}
-                                </td>
-
                                 {/* STATUS */}
 
                                 <td className="px-4 py-3">
-                                    <span
-                                        className={`badge ${getStatusClass(
-                                            row.status,
-                                        )} capitalize`}
-                                    >
-                                        {row.status.replace('_', ' ')}
-                                    </span>
+                                    {renderStatusBadge(row.distribution)}
                                 </td>
 
                                 {/* ACTIONS */}
@@ -1131,6 +1119,28 @@ export default function DistributionPage({
                                                 <Trash2 size={15} />
                                             </button>
                                         )}
+
+                                        {/* EXCLUDE — only for pending + non-excluded rows, admin only */}
+                                        {userRole === 'admin' && row.distribution.status === 'pending' && !row.distribution.excluded && (
+                                            <button
+                                                type="button"
+                                                onClick={() => openExcludeModal(row.distribution)}
+                                                className="text-xs px-2 py-1 rounded bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
+                                            >
+                                                Exclude
+                                            </button>
+                                        )}
+
+                                        {/* INCLUDE — only for excluded rows, admin only */}
+                                        {userRole === 'admin' && row.distribution.excluded && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleInclude(row.distribution)}
+                                                className="text-xs px-2 py-1 rounded bg-green-50 text-green-700 border border-green-200 hover:bg-green-100"
+                                            >
+                                                Include
+                                            </button>
+                                        )}
                                     </div>
                                 </td>
                             </tr>
@@ -1149,6 +1159,9 @@ export default function DistributionPage({
                         setEditingDistribution(null);
                         form.reset();
                         form.clearErrors();
+                        setStockWarnings([]);
+                        setStockOk(false);
+                        setStockCheckLoading(false);
                     }}
                     title={
                         editingDistribution
@@ -1177,6 +1190,167 @@ export default function DistributionPage({
                                     disabled
                                 />
                             </div>
+
+                            {/* ASSIGNMENT MODE */}
+                            <div>
+                                <label className="mb-1 block text-sm font-medium text-slate-700">
+                                    Resource Assignment
+                                </label>
+                                <div className="flex gap-4">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="assignment_mode"
+                                            value="set"
+                                            checked={form.data.assignment_mode === 'set'}
+                                            onChange={() => {
+                                                form.setData('assignment_mode', 'set');
+                                                form.setData('items', []);
+                                            }}
+                                            className="h-4 w-4 text-blue-600"
+                                        />
+                                        <span className="text-sm text-slate-700">Assign a Set</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="assignment_mode"
+                                            value="individual"
+                                            checked={form.data.assignment_mode === 'individual'}
+                                            onChange={() => {
+                                                form.setData('assignment_mode', 'individual');
+                                                form.setData('resource_set_id', '');
+                                            }}
+                                            className="h-4 w-4 text-blue-600"
+                                        />
+                                        <span className="text-sm text-slate-700">Assign Individual Items</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            {/* SET DROPDOWN — shown when mode = 'set' */}
+                            {form.data.assignment_mode === 'set' && (
+                                <div>
+                                    <label className="mb-1 block text-sm font-medium text-slate-700">
+                                        Resource Set
+                                    </label>
+                                    <select
+                                        className="input-field"
+                                        value={form.data.resource_set_id}
+                                        onChange={(e) => {
+                                            form.setData('resource_set_id', e.target.value);
+                                            if (e.target.value) {
+                                                runStockCheck('set', e.target.value, undefined, form.data.location_id || undefined);
+                                            }
+                                        }}
+                                    >
+                                        <option value="">— Select a set —</option>
+                                        {resourceSets.map((set) => (
+                                            <option key={set.id} value={set.id}>
+                                                {set.name}{set.disaster ? ` (${set.disaster})` : ''}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {form.errors.resource_set_id && (
+                                        <p className="mt-1 text-xs text-red-500">{form.errors.resource_set_id}</p>
+                                    )}
+                                    {/* Preview selected set items */}
+                                    {form.data.resource_set_id && (() => {
+                                        const selectedSet = resourceSets.find((s) => String(s.id) === String(form.data.resource_set_id));
+                                        if (!selectedSet?.items?.length) return null;
+                                        return (
+                                            <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                                                <p className="mb-1.5 text-xs font-medium text-slate-500 uppercase">Set Contents</p>
+                                                {selectedSet.items.map((item) => (
+                                                    <p key={item.id} className="text-sm text-slate-700">
+                                                        {item.resource?.name ?? `Resource #${item.resource_id}`}
+                                                        <span className="ml-1 text-xs text-slate-400">— {item.quantity} {item.resource?.unit ?? ''}/family</span>
+                                                    </p>
+                                                ))}
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            )}
+
+                            {/* INDIVIDUAL CHECKLIST — shown when mode = 'individual' */}
+                            {form.data.assignment_mode === 'individual' && (
+                                <div>
+                                    <label className="mb-1 block text-sm font-medium text-slate-700">
+                                        Individual Items
+                                    </label>
+                                    <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200">
+                                        {resources.map((r) => {
+                                            const checked = form.data.items.some((i) => Number(i.resource_id) === r.id);
+                                            const qty = form.data.items.find((i) => Number(i.resource_id) === r.id)?.quantity ?? 1;
+                                            return (
+                                                <div key={r.id} className={`flex items-center gap-3 px-3 py-2 border-b border-slate-50 last:border-0 ${checked ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={checked}
+                                                        onChange={() => {
+                                                            let newItems;
+                                                            if (checked) {
+                                                                newItems = form.data.items.filter((i) => Number(i.resource_id) !== r.id);
+                                                            } else {
+                                                                newItems = [...form.data.items, { resource_id: r.id, quantity: 1 }];
+                                                            }
+                                                            form.setData('items', newItems);
+                                                            if (newItems.length > 0) {
+                                                                runStockCheck('individual', undefined, newItems, form.data.location_id || undefined);
+                                                            }
+                                                        }}
+                                                        className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                                                    />
+                                                    <span className="flex-1 text-sm text-slate-700">{r.name} <span className="text-xs text-slate-400">({r.unit})</span></span>
+                                                    {checked && (
+                                                        <input
+                                                            type="number"
+                                                            min={1}
+                                                            value={qty}
+                                                            onChange={(e) => {
+                                                                const newItems = form.data.items.map((i) =>
+                                                                    Number(i.resource_id) === r.id ? { ...i, quantity: Number(e.target.value) } : i
+                                                                );
+                                                                form.setData('items', newItems);
+                                                                runStockCheck('individual', undefined, newItems, form.data.location_id || undefined);
+                                                            }}
+                                                            className="input-field w-20 py-1 text-sm"
+                                                        />
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* STOCK CHECK BANNER */}
+                            {form.data.assignment_mode && (
+                                <div>
+                                    {stockCheckLoading && (
+                                        <p className="text-sm text-slate-400">Checking stock…</p>
+                                    )}
+                                    {!stockCheckLoading && stockWarnings.length > 0 && (
+                                        <div className="rounded-md bg-amber-50 border border-amber-200 p-3">
+                                            <p className="text-sm font-semibold text-amber-800 mb-1.5">Warning: stock may not cover all families — you can still proceed
+                                            </p>
+                                            <ul className="text-sm text-amber-700 space-y-1">
+                                                {stockWarnings.map((w) => (
+                                                    <li key={w.resource_id}>
+                                                        <strong>{w.resource_name}</strong>: {w.available} {w.unit} available,{' '}
+                                                        {w.required} required (shortfall: {w.shortfall} {w.unit})
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                            <p className="text-xs text-amber-600 mt-2">You can still save — this is a warning only.</p>
+                                        </div>
+                                    )}
+                                    {!stockCheckLoading && stockOk && (
+                                        <p className="text-sm font-medium text-green-600">✓ Stock OK</p>
+                                    )}
+                                </div>
+                            )}
 
                             {/* RELIEF */}
 
@@ -1491,6 +1665,9 @@ export default function DistributionPage({
                                     setEditingDistribution(null);
                                     form.reset();
                                     form.clearErrors();
+                                    setStockWarnings([]);
+                                    setStockOk(false);
+                                    setStockCheckLoading(false);
                                 }}
                             >
                                 Cancel
@@ -1521,6 +1698,41 @@ export default function DistributionPage({
                         deleting?.recipient_name ?? 'this family'
                     }"? Completed distributions will restore stock.`}
                 />
+
+                {/* EXCLUSION MODAL */}
+                {excludingDistribution && (
+                    <Modal open onClose={() => { setExcludingDistribution(null); setExcludeReason(''); setExcludeError(''); }} title="Exclude Family">
+                        <form onSubmit={handleExcludeConfirm} className="p-4">
+                            <h2 className="text-lg font-semibold mb-2">Exclude Family</h2>
+                            <p className="text-sm text-gray-600 mb-3">
+                                Optionally enter a reason for excluding{' '}
+                                <strong>{excludingDistribution.family?.family_name}</strong>.
+                            </p>
+                            <label className="block text-sm font-medium mb-1">Reason (optional)</label>
+                            <textarea
+                                className="w-full border border-gray-200 rounded-lg p-2 text-sm"
+                                rows={3}
+                                value={excludeReason}
+                                onChange={(e) => setExcludeReason(e.target.value)}
+                                placeholder="Enter reason..."
+                                maxLength={500}
+                            />
+                            {excludeError && <p className="text-red-600 text-xs mt-1">{excludeError}</p>}
+                            <div className="flex justify-end gap-2 mt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => { setExcludingDistribution(null); setExcludeReason(''); setExcludeError(''); }}
+                                    className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button type="submit" className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700">
+                                    Confirm Exclusion
+                                </button>
+                            </div>
+                        </form>
+                    </Modal>
+                )}
             </>
             )} {/* end admin-only edit/delete */}
 

@@ -96,15 +96,16 @@ class FamilyController extends Controller
                 'purok_id',
             ]);
 
+        $allLocations = Location::query()->orderBy('name')->get(['id', 'name', 'status']);
+
         return Inertia::render('families', [
-            'families' => $families,
-            'userRole' => $user->role,
-            'puroks' => $puroks,
-            'locations' => $locations,
-            'staff' => $staff,
-            'filters' => $request->only([
-                'search',
-            ]),
+            'families'     => $families,
+            'userRole'     => $user->role,
+            'puroks'       => $puroks,
+            'locations'    => $locations,
+            'allLocations' => $allLocations,
+            'staff'        => $staff,
+            'filters'      => $request->only(['search', 'location_id']),
         ]);
     }
 

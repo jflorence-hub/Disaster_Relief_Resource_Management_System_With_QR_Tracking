@@ -40,7 +40,7 @@ class StaffApprovalService
                 . "Welcome to the team!",
                 function ($message) use ($user) {
                     $message->to($user->email)
-                        ->subject('Registration Approved — Disaster Relief System');
+                        ->subject('Registration Approved - Disaster Relief System');
                 }
             );
         } catch (\Exception $e) {
@@ -68,7 +68,7 @@ class StaffApprovalService
                 . "Please contact the administrator for more information.",
                 function ($message) use ($email) {
                     $message->to($email)
-                        ->subject('Staff Registration Update — Disaster Relief System');
+                        ->subject('Staff Registration Update - Disaster Relief System');
                 }
             );
         } catch (\Exception $e) {

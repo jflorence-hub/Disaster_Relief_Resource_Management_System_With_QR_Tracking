@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 use App\Http\Controllers\Api\AdminStaffController;
 use App\Http\Controllers\Api\AnnouncementController;
@@ -94,4 +94,6 @@ Route::middleware(['auth.token', 'auth.admin'])->group(function () {
     Route::get('admin/pending-staff', [AdminStaffController::class, 'pendingStaff']);
     Route::post('admin/approve-staff/{user}', [AdminStaffController::class, 'approveStaff']);
     Route::post('admin/reject-staff/{user}', [AdminStaffController::class, 'rejectStaff']);
+    Route::post('admin/distributions/{id}/exclude', [DistributionController::class, 'exclude']);
+    Route::post('admin/distributions/{id}/include', [DistributionController::class, 'include']);
 });

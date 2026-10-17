@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Distribution;
 use App\Models\Family;
 use App\Models\Location;
 use App\Models\QrScan;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -69,9 +71,48 @@ class QrTrackingController extends Controller
                 ];
             });
 
+        // ── Distribution history for the calendar tab ───────────────────────
+        $scheduleHistory = DB::table('distribution_schedules as s')
+            ->leftJoin('resources as r', 'r.id', '=', 's.resource_id')
+            ->leftJoin('locations as l', 'l.id', '=', 's.location_id')
+            ->orderByDesc('s.scheduled_at')
+            ->get(['s.id', 's.scheduled_at', 'r.name as resource_name', 'l.name as location_name'])
+            ->map(function ($schedule) use ($user) {
+                $dists = DB::table('distributions as d')
+                    ->join('families as f', 'f.id', '=', 'd.family_id')
+                    ->leftJoin('puroks as p',     'p.id', '=', 'f.purok_id')
+                    ->leftJoin('resources as r2', 'r2.id', '=', 'd.resource_id')
+                    ->leftJoin('users as u',      'u.id',  '=', 'd.distributed_by')
+                    ->leftJoin('qr_scans as q',   function ($join) {
+                        $join->on('q.family_id', '=', 'f.id')
+                              ->where('q.scan_type', 'completed');
+                    })
+                    ->where('d.schedule_id', $schedule->id)
+                    ->when($user->role === 'staff', fn ($q) => $q->where('f.purok_id', $user->purok_id))
+                    ->get([
+                        'd.id', 'd.status', 'd.excluded', 'd.exclusion_reason',
+                        'd.quantity', 'f.family_id as family_code',
+                        'f.family_name', 'f.head_name', 'f.location_id',
+                        'p.name as purok_name',
+                        'r2.name as resource_name', 'r2.unit as resource_unit',
+                        'u.name as scanned_by',
+                        'q.receiver', 'q.scanned_at as scan_time',
+                    ]);
+
+                return [
+                    'id'            => $schedule->id,
+                    'scheduled_at'  => $schedule->scheduled_at,
+                    'resource_name' => $schedule->resource_name,
+                    'location_name' => $schedule->location_name,
+                    'families'      => $dists,
+                ];
+            });
+
         return Inertia::render('qr-tracking', [
-            'scans'    => $scans,
-            'userRole' => $user->role,
+            'scans'          => $scans,
+            'userRole'       => $user->role,
+            'scheduleHistory' => $scheduleHistory,
+            'allLocations'   => \App\Models\Location::where('status', 'active')->orderBy('name')->get(['id', 'name']),
 
             'families' => Family::select('id', 'family_id', 'family_name', 'head_name', 'purok_id')
                 ->with([

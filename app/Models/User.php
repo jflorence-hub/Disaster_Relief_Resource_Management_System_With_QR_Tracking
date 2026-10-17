@@ -13,21 +13,29 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
 
 /**
- * @property int $id
- * @property string $name
- * @property string $email
- * @property string $role
+ * @property int         $id
+ * @property string|null $staff_id
+ * @property string      $name
+ * @property string      $email
+ * @property string      $role
  * @property string|null $phone
- * @property string $status
- * @property int|null $location_id
+ * @property string      $status
+ * @property int|null    $location_id
  * @property string|null $responsibilities
+ * @property Carbon|null $birthdate
+ * @property string|null $home_address
  * @property Carbon|null $email_verified_at
- * @property string $password
+ * @property string      $password
  * @property string|null $remember_token
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['name', 'email', 'password', 'role', 'phone', 'status', 'location_id', 'purok_id', 'responsibilities', 'avatar', 'reset_code_hash', 'reset_code_expires_at', 'must_change_password'])]
+#[Fillable([
+    'name', 'email', 'password', 'role', 'phone', 'status',
+    'location_id', 'purok_id', 'responsibilities',
+    'avatar', 'reset_code_hash', 'reset_code_expires_at',
+    'must_change_password', 'staff_id', 'birthdate', 'home_address',
+])]
 #[Hidden(['password', 'remember_token', 'api_token'])]
 class User extends Authenticatable
 {
@@ -36,7 +44,7 @@ class User extends Authenticatable
 
     public function purok(): BelongsTo
     {
-    return $this->belongsTo(Purok::class);
+        return $this->belongsTo(Purok::class);
     }
 
     public function isAdmin(): bool
@@ -67,10 +75,11 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
-            'password' => 'hashed',
+            'email_verified_at'     => 'datetime',
+            'password'              => 'hashed',
             'reset_code_expires_at' => 'datetime',
-            'must_change_password' => 'boolean',
+            'must_change_password'  => 'boolean',
+            'birthdate'             => 'date',
         ];
     }
 }

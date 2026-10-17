@@ -41,6 +41,10 @@ class DistributionController extends Controller
         Family::query()
             ->where('status', 'active')
             ->when(
+                $user->role === 'admin' && $request->filled('location_id'),
+                fn ($query) => $query->where('location_id', (int) $request->input('location_id'))
+            )
+            ->when(
                 $user->role === 'staff',
                 fn ($query) => $user->purok_id
                     ? $query->where('purok_id', $user->purok_id)
@@ -123,16 +127,30 @@ class DistributionController extends Controller
                     $request->input('status')
                 )
             )
+            ->when(
+                $request->filled('location_id'),
+                fn ($query) => $query->whereHas(
+                    'family',
+                    fn ($q) => $q->where('location_id', (int) $request->input('location_id'))
+                )
+            )
             ->orderByDesc('distribution_date')
             ->orderByDesc('id')
             ->get();
 
         /*
          * Active families.
+         * For admin: scoped to the location_id filter when present, so the
+         * stat cards and family dropdown always reflect the selected barangay.
+         * For staff: scoped to their own purok (unchanged).
          */
         $families = Family::query()
             ->with('purok:id,name')
             ->where('status', 'active')
+            ->when(
+                $user->role === 'admin' && $request->filled('location_id'),
+                fn ($query) => $query->where('location_id', (int) $request->input('location_id'))
+            )
             ->when(
                 $user->role === 'staff',
                 fn ($query) => $query->where(
@@ -150,6 +168,7 @@ class DistributionController extends Controller
                 'household_member',
                 'address',
                 'purok_id',
+                'location_id',
                 'status',
             ]);
 
@@ -211,80 +230,22 @@ class DistributionController extends Controller
             'resources' => $resources,
             'locations' => $locations,
             'families' => $families,
+            'allLocations' => Location::query()
+                ->where('status', 'active')
+                ->orderBy('name')
+                ->get(['id', 'name']),
             'staff' => $staff,
-            'filters' => $request->only(['search', 'status']),
+            'filters' => $request->only(['search', 'status', 'location_id']),
             'currentDate' => now()->format('Y-m-d\TH:i'),
             'scheduledAt' => date(
                 'Y-m-d\TH:i',
                 strtotime((string) $scheduledAt)
             ),
             'defaultSetResource' => null,
-
-            /*
-             * Puroks for the history purok-filter dropdown.
-             * Staff only see their own purok.
-             */
-            'puroks' => \App\Models\Purok::query()
-                ->where('status', 'active')
-                ->when(
-                    $user->role === 'staff' && $user->purok_id,
-                    fn ($q) => $q->whereKey($user->purok_id)
-                )
+            'resourceSets' => \App\Models\ResourceSet::query()
+                ->with(['items.resource:id,name,unit', 'location:id,name'])
                 ->orderBy('name')
-                ->get(['id', 'name']),
-
-            /*
-             * All past distribution schedules for the history dropdown.
-             * Each entry includes its distributions (with family info)
-             * so the frontend can render the per-schedule family list.
-             */
-            'scheduleHistory' => DB::table('distribution_schedules as s')
-                ->leftJoin('resources as r', 'r.id', '=', 's.resource_id')
-                ->leftJoin('locations as l', 'l.id', '=', 's.location_id')
-                ->orderByDesc('s.scheduled_at')
-                ->get([
-                    's.id',
-                    's.scheduled_at',
-                    'r.name as resource_name',
-                    'l.name as location_name',
-                ])
-                ->map(function ($schedule) use ($user) {
-                    $familyDistributions = DB::table('distributions as d')
-                        ->join('families as f', 'f.id', '=', 'd.family_id')
-                        ->leftJoin('puroks as p',     'p.id', '=', 'f.purok_id')
-                        ->leftJoin('resources as r2', 'r2.id', '=', 'd.resource_id')
-                        ->leftJoin('resources as r3', 'r3.id', '=', 'd.additional_resource_id')
-                        ->leftJoin('users as u',      'u.id',  '=', 'd.distributed_by')
-                        ->where('d.schedule_id', $schedule->id)
-                        ->when(
-                            $user->role === 'staff',
-                            fn ($q) => $q->where('f.purok_id', $user->purok_id)
-                        )
-                        ->get([
-                            'd.id',
-                            'd.status',
-                            'd.quantity',
-                            'd.additional_quantity',
-                            'f.family_id as family_code',
-                            'f.family_name',
-                            'f.head_name',
-                            'f.household_member',
-                            'p.name as purok_name',
-                            'r2.name as resource_name',
-                            'r2.unit as resource_unit',
-                            'r3.name as additional_resource_name',
-                            'r3.unit as additional_resource_unit',
-                            'u.name as scanned_by',
-                        ]);
-
-                    return [
-                        'id'            => $schedule->id,
-                        'scheduled_at'  => $schedule->scheduled_at,
-                        'resource_name' => $schedule->resource_name,
-                        'location_name' => $schedule->location_name,
-                        'families'      => $familyDistributions,
-                    ];
-                }),
+                ->get(),
         ]);
     }
 
@@ -317,27 +278,62 @@ class DistributionController extends Controller
             ->orderByDesc('id')
             ->value('scheduled_at') ?? now();
 
-        $distribution = DB::transaction(function () use ($data) {
-            $distribution = Distribution::create($data);
+        $distribution = DB::transaction(function () use ($data, $request) {
+            $distribution = Distribution::create([
+                'family_id'           => $data['family_id'],
+                'resource_id'         => $data['resource_id'] ?? null,
+                'resource_set_id'     => ($data['assignment_mode'] ?? null) === 'set' ? ($data['resource_set_id'] ?? null) : null,
+                'assignment_mode'     => $data['assignment_mode'] ?? null,
+                'additional_resource_id' => $data['additional_resource_id'] ?? null,
+                'location_id'         => $data['location_id'] ?? null,
+                'distributed_by'      => $data['distributed_by'],
+                'quantity'            => $data['quantity'],
+                'additional_quantity' => $data['additional_quantity'] ?? null,
+                'recipient_name'      => $data['recipient_name'],
+                'recipient_contact'   => $data['recipient_contact'],
+                'household_member'    => $data['household_member'],
+                'distribution_date'   => $data['distribution_date'],
+                'status'              => $data['status'],
+                'notes'               => $data['notes'] ?? null,
+                'reason'              => $data['reason'] ?? null,
+                'disaster'            => $data['disaster'] ?? null,
+            ]);
+
+            if (($data['assignment_mode'] ?? null) === 'individual' && !empty($data['items'])) {
+                foreach ($data['items'] as $item) {
+                    $distribution->items()->create([
+                        'resource_id' => $item['resource_id'],
+                        'quantity'    => (int) $item['quantity'],
+                    ]);
+                }
+            }
 
             if (
                 $distribution->status === 'completed'
                 && (
                     $distribution->resource_id
                     || $distribution->additional_resource_id
+                    || $distribution->resource_set_id
+                    || $distribution->items()->exists()
                 )
             ) {
+                $distribution->load('items');
                 $distribution->applyStock();
             }
 
             return $distribution;
         });
 
+        $stockWarnings = $this->calculateStockWarnings($distribution->fresh(['items']));
+
         return redirect()
             ->route('distribution.index')
-            ->with('success', 'Distribution saved successfully.');
+            ->with('success', 'Distribution saved successfully.')
+            ->with('stock_warnings', $stockWarnings);
     }
 
+    /**
+     * Update an existing distribution.
     /**
      * Update an existing distribution.
      */
@@ -374,74 +370,98 @@ class DistributionController extends Controller
             'notes'    => ['nullable', 'string'],
             'reason'   => ['nullable', 'string'],
             'disaster' => ['nullable', 'string', 'in:Typhoon,Flood,Earthquake,Fire,Drought,Landslide,Volcanic Eruption,Other'],
+            'assignment_mode'     => ['nullable', 'in:set,individual'],
+            'resource_set_id'     => ['nullable', 'exists:resource_sets,id'],
+            'items'               => ['nullable', 'array'],
+            'items.*.resource_id' => ['nullable', 'exists:resources,id'],
+            'items.*.quantity'    => ['nullable', 'integer', 'min:1'],
         ]);
 
         $family = Family::findOrFail($data['family_id']);
 
         $this->checkStaffAccess($request, $family);
 
-        DB::transaction(function () use ($distribution, $data, $family) {
-            $distribution = Distribution::query()
+        $updatedDistribution = null;
+
+        DB::transaction(function () use ($distribution, $data, $family, &$updatedDistribution) {
+            $dist = Distribution::query()
                 ->whereKey($distribution->id)
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($distribution->status === 'completed') {
-                $distribution->reverseStock();
+            if ($dist->status === 'completed') {
+                $dist->reverseStock();
             }
 
-            $distribution->family_id = $family->id;
-            $distribution->recipient_name = $family->family_name;
-            $distribution->recipient_contact = $family->phone;
-            $distribution->household_member = $family->household_member;
+            $dist->family_id = $family->id;
+            $dist->recipient_name = $family->family_name;
+            $dist->recipient_contact = $family->phone;
+            $dist->household_member = $family->household_member;
+            $dist->resource_id = $data['resource_id'] ?? null;
+            $dist->quantity = max(1, (int) ceil(max(1, (int) $family->household_member) / 3));
+            $dist->additional_resource_id = $data['additional_resource_id'] ?? null;
+            $dist->additional_quantity = !empty($data['additional_resource_id'])
+                ? (int) ($data['additional_quantity'] ?? 1)
+                : null;
+            $dist->location_id = $data['location_id'] ?? null;
+            $dist->distribution_date = DB::table('distribution_schedules')
+                ->orderByDesc('id')
+                ->value('scheduled_at') ?? now();
+            $dist->status = $data['status'];
+            $dist->notes = $data['notes'] ?? null;
+            $dist->reason = $data['reason'] ?? null;
+            $dist->disaster = $data['disaster'] ?? null;
 
-            $distribution->resource_id = $data['resource_id'] ?? null;
-            $distribution->quantity = max(
-                1,
-                (int) ceil(max(1, (int) $family->household_member) / 3)
-            );
+            // Assignment mode handling
+            $mode = $data['assignment_mode'] ?? null;
+            if ($mode === 'set') {
+                $dist->items()->delete();
+                $dist->resource_set_id = $data['resource_set_id'] ?? null;
+                $dist->assignment_mode = 'set';
+            } elseif ($mode === 'individual') {
+                $dist->resource_set_id = null;
+                $dist->assignment_mode = 'individual';
+            } else {
+                $dist->assignment_mode = $dist->getOriginal('assignment_mode');
+            }
 
-            $distribution->additional_resource_id =
-                $data['additional_resource_id'] ?? null;
+            $dist->save();
 
-            $distribution->additional_quantity =
-                !empty($data['additional_resource_id'])
-                    ? (int) ($data['additional_quantity'] ?? 1)
-                    : null;
-
-            $distribution->location_id = $data['location_id'] ?? null;
-
-            $distribution->distribution_date =
-                DB::table('distribution_schedules')
-                    ->orderByDesc('id')
-                    ->value('scheduled_at') ?? now();
-
-            $distribution->status = $data['status'];
-            $distribution->notes = $data['notes'] ?? null;
-            $distribution->reason = $data['reason'] ?? null;
-            $distribution->disaster = $data['disaster'] ?? null;
-
-            $distribution->save();
+            if ($mode === 'individual' && !empty($data['items'])) {
+                $dist->items()->delete();
+                foreach ($data['items'] as $item) {
+                    $dist->items()->create([
+                        'resource_id' => $item['resource_id'],
+                        'quantity'    => (int) $item['quantity'],
+                    ]);
+                }
+            }
 
             if (
-                $distribution->status === 'completed'
+                $dist->status === 'completed'
                 && (
-                    $distribution->resource_id
-                    || $distribution->additional_resource_id
+                    $dist->resource_id
+                    || $dist->additional_resource_id
+                    || $dist->resource_set_id
+                    || $dist->items()->exists()
                 )
             ) {
-                $distribution->applyStock();
+                $dist->load('items');
+                $dist->applyStock();
             }
+
+            $updatedDistribution = $dist;
         });
+
+        $stockWarnings = $updatedDistribution
+            ? $this->calculateStockWarnings($updatedDistribution->fresh(['items']))
+            : [];
 
         return redirect()
             ->route('distribution.index')
-            ->with('success', 'Distribution updated successfully.');
+            ->with('success', 'Distribution updated successfully.')
+            ->with('stock_warnings', $stockWarnings);
     }
-
-    /**
-     * Delete a distribution.
-     */
     public function destroy(
         Request $request,
         Distribution $distribution
@@ -472,6 +492,9 @@ class DistributionController extends Controller
 
     /**
      * Create a schedule and one distribution per active family.
+
+    /**
+     * Create a schedule and one distribution per active family.
      */
     public function updateSchedule(Request $request): RedirectResponse
     {
@@ -482,9 +505,14 @@ class DistributionController extends Controller
         );
 
         $data = $request->validate([
-            'scheduled_at' => ['required', 'date'],
-            'resource_id'  => ['required', 'exists:resources,id'],
-            'location_id'  => ['nullable', 'exists:locations,id'],
+            'scheduled_at'        => ['required', 'date'],
+            'resource_id'         => ['required', 'exists:resources,id'],
+            'location_id'         => ['nullable', 'exists:locations,id'],
+            'assignment_mode'     => ['nullable', 'in:set,individual'],
+            'resource_set_id'     => ['nullable', 'exists:resource_sets,id'],
+            'items'               => ['nullable', 'array'],
+            'items.*.resource_id' => ['nullable', 'exists:resources,id'],
+            'items.*.quantity'    => ['nullable', 'integer', 'min:1'],
         ]);
 
         DB::transaction(function () use ($request, $data) {
@@ -511,27 +539,33 @@ class DistributionController extends Controller
                     $scheduledAt,
                     $scheduleId
                 ) {
-                    Distribution::create([
-                        'family_id' => $family->id,
-                        'resource_id' => $data['resource_id'],
-                        'quantity' => max(
-                            1,
-                            (int) ceil(
-                                max(1, (int) $family->household_member) / 3
-                            )
-                        ),
+                    $dist = Distribution::create([
+                        'family_id'       => $family->id,
+                        'resource_id'     => $data['resource_id'],
+                        'resource_set_id' => ($data['assignment_mode'] ?? null) === 'set' ? ($data['resource_set_id'] ?? null) : null,
+                        'assignment_mode' => $data['assignment_mode'] ?? null,
+                        'quantity'        => max(1, (int) ceil(max(1, (int) $family->household_member) / 3)),
                         'additional_resource_id' => null,
-                        'additional_quantity' => null,
-                        'location_id' => $family->location_id,
+                        'additional_quantity'    => null,
+                        'location_id'     => $family->location_id,
                         'distribution_date' => $scheduledAt,
-                        'recipient_name' => $family->family_name,
+                        'recipient_name'  => $family->family_name,
                         'recipient_contact' => $family->phone,
                         'household_member' => $family->household_member,
-                        'distributed_by' => $request->user()->id,
-                        'status' => 'pending',
-                        'notes' => null,
-                        'schedule_id' => $scheduleId,
+                        'distributed_by'  => $request->user()->id,
+                        'status'          => 'pending',
+                        'notes'           => null,
+                        'schedule_id'     => $scheduleId,
                     ]);
+
+                    if (($data['assignment_mode'] ?? null) === 'individual' && !empty($data['items'])) {
+                        foreach ($data['items'] as $item) {
+                            $dist->items()->create([
+                                'resource_id' => $item['resource_id'],
+                                'quantity'    => (int) $item['quantity'],
+                            ]);
+                        }
+                    }
                 });
         });
 
@@ -541,6 +575,70 @@ class DistributionController extends Controller
                 'success',
                 'New relief distribution schedule added for all registered families.'
             );
+    }
+
+    public function checkStock(Request $request): \Illuminate\Http\JsonResponse
+    {
+        abort_unless($request->user()?->role === 'admin', 403);
+
+        $data = $request->validate([
+            'assignment_mode'     => ['required', 'in:set,individual'],
+            'resource_set_id'     => ['nullable', 'exists:resource_sets,id'],
+            'items'               => ['nullable', 'array'],
+            'items.*.resource_id' => ['required_with:items', 'exists:resources,id'],
+            'items.*.quantity'    => ['required_with:items', 'integer', 'min:1'],
+            'location_id'         => ['nullable', 'exists:locations,id'],
+        ]);
+
+        $nonExcludedCount = $this->getNonExcludedFamilyCount(
+            isset($data['location_id']) ? (int) $data['location_id'] : null
+        );
+
+        $itemsToCheck = [];
+
+        if ($data['assignment_mode'] === 'set' && !empty($data['resource_set_id'])) {
+            $set = \App\Models\ResourceSet::with('items.resource:id,name,unit,quantity')
+                ->find($data['resource_set_id']);
+
+            if ($set) {
+                foreach ($set->items as $setItem) {
+                    $itemsToCheck[] = [
+                        'resource' => $setItem->resource,
+                        'quantity' => $setItem->quantity,
+                    ];
+                }
+            }
+        } elseif ($data['assignment_mode'] === 'individual' && !empty($data['items'])) {
+            foreach ($data['items'] as $item) {
+                $resource = Resource::find($item['resource_id']);
+                if ($resource) {
+                    $itemsToCheck[] = [
+                        'resource' => $resource,
+                        'quantity' => $item['quantity'],
+                    ];
+                }
+            }
+        }
+
+        $warnings = [];
+
+        foreach ($itemsToCheck as $check) {
+            $required  = $check['quantity'] * $nonExcludedCount;
+            $available = $check['resource']->quantity ?? 0;
+
+            if ($available < $required) {
+                $warnings[] = [
+                    'resource_id'   => $check['resource']->id,
+                    'resource_name' => $check['resource']->name,
+                    'unit'          => $check['resource']->unit,
+                    'available'     => $available,
+                    'required'      => $required,
+                    'shortfall'     => $required - $available,
+                ];
+            }
+        }
+
+        return response()->json(['warnings' => $warnings]);
     }
 
     /**
@@ -571,6 +669,11 @@ class DistributionController extends Controller
             'notes'    => ['nullable', 'string'],
             'reason'   => ['nullable', 'string'],
             'disaster' => ['nullable', 'string', 'in:Typhoon,Flood,Earthquake,Fire,Drought,Landslide,Volcanic Eruption,Other'],
+            'assignment_mode'     => ['nullable', 'in:set,individual'],
+            'resource_set_id'     => ['nullable', 'exists:resource_sets,id'],
+            'items'               => ['nullable', 'array'],
+            'items.*.resource_id' => ['nullable', 'exists:resources,id'],
+            'items.*.quantity'    => ['nullable', 'integer', 'min:1'],
         ]);
     }
 
@@ -592,6 +695,111 @@ class DistributionController extends Controller
                 'You cannot distribute to a family outside your Purok.'
             );
         }
+    }
+
+    /**
+     * Count active families that are not excluded on any pending distribution.
+     * Optionally scoped to a specific location.
+     */
+    private function getNonExcludedFamilyCount(?int $locationId = null): int
+    {
+        return \App\Models\Family::query()
+            ->where('status', 'active')
+            ->when($locationId, fn($q) => $q->where('location_id', $locationId))
+            ->whereDoesntHave('distributions', function ($q) {
+                $q->where('excluded', true)
+                  ->where('status', 'pending');
+            })
+            ->count();
+    }
+
+    /**
+     * Build stock warnings for a saved distribution.
+     * Returns an array of warning objects (empty array if no shortfalls).
+     */
+    private function calculateStockWarnings(Distribution $distribution): array
+    {
+        $nonExcludedCount = $this->getNonExcludedFamilyCount($distribution->location_id);
+
+        $itemsToCheck = [];
+
+        if ($distribution->resource_set_id) {
+            $set = \App\Models\ResourceSet::with('items.resource:id,name,unit,quantity')
+                ->find($distribution->resource_set_id);
+            if ($set) {
+                foreach ($set->items as $item) {
+                    $itemsToCheck[] = ['resource' => $item->resource, 'quantity' => $item->quantity];
+                }
+            }
+        } else {
+            $distribution->loadMissing('items');
+            foreach ($distribution->items as $item) {
+                $resource = \App\Models\Resource::find($item->resource_id);
+                if ($resource) {
+                    $itemsToCheck[] = ['resource' => $resource, 'quantity' => $item->quantity];
+                }
+            }
+        }
+
+        $warnings = [];
+
+        foreach ($itemsToCheck as $check) {
+            $required  = $check['quantity'] * $nonExcludedCount;
+            $available = $check['resource']->quantity ?? 0;
+
+            if ($available < $required) {
+                $warnings[] = [
+                    'resource_id'   => $check['resource']->id,
+                    'resource_name' => $check['resource']->name,
+                    'unit'          => $check['resource']->unit,
+                    'available'     => $available,
+                    'required'      => $required,
+                    'shortfall'     => $required - $available,
+                ];
+            }
+        }
+
+        return $warnings;
+    }
+
+    /**
+     * Exclude a family from a distribution schedule.
+     */
+    public function exclude(Request $request, Distribution $distribution): RedirectResponse
+    {
+        abort_unless($request->user()?->role === 'admin', 403);
+
+        if ($distribution->status === 'completed') {
+            return back()->withErrors([
+                'exclude' => 'Cannot exclude a distribution that is already completed.',
+            ]);
+        }
+
+        $data = $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $distribution->update([
+            'excluded'         => true,
+            'exclusion_reason' => $data['reason'] ?? null,
+        ]);
+
+        return back()->with('success', 'Family excluded from this distribution schedule.');
+    }
+
+    /**
+     * Re-include a previously excluded family in a distribution schedule.
+     */
+    public function include(Request $request, Distribution $distribution): RedirectResponse
+    {
+        abort_unless($request->user()?->role === 'admin', 403);
+
+        $distribution->update([
+            'excluded'         => false,
+            'exclusion_reason' => null,
+        ]);
+
+        return back()->with('success', 'Family re-included in this distribution schedule.');
     }
 
     /**

@@ -92,13 +92,45 @@ class AuthController extends Controller
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'name'                  => 'required|string|max:255',
-            'email'                 => 'required|email|unique:users,email',
-            'phone'                 => ['nullable', 'regex:/^09[0-9]{9}$/'],
-            'purok_id'              => 'required|exists:puroks,id',
-            'location_id'           => 'required|exists:locations,id',
-            'password'              => 'required|string|min:8|confirmed',
+            'name'        => 'required|string|max:255',
+            'email'       => 'required|email|unique:users,email',
+            'phone'       => ['nullable', 'regex:/^09[0-9]{9}$/'],
+            'purok_id'    => 'required|exists:puroks,id',
+            'location_id' => 'required|exists:locations,id',
+            // Complexity: min 8, at least one uppercase, one digit, one special char
+            'password'    => [
+                'required',
+                'string',
+                'min:8',
+                'confirmed',
+                'regex:/[A-Z]/',
+                'regex:/[0-9]/',
+                'regex:/[@$!%*#?&^()_\-+=\[\]{};:\'",.<>\\/|`~]/',
+            ],
+        ], [
+            'password.regex' => 'Password must contain at least one uppercase letter, one number, and one special character.',
         ]);
+
+        // Server-side: location must be active (prevents race with admin deactivating a location)
+        $location = \App\Models\Location::find($validated['location_id']);
+        if (! $location || $location->status !== 'active') {
+            return response()->json([
+                'message' => 'The selected location is not currently accepting applications.',
+                'errors'  => ['location_id' => ['This location is not available for registration.']],
+            ], 422);
+        }
+
+        // Server-side: purok must not be occupied (prevents race condition)
+        $purok = Purok::find($validated['purok_id']);
+        if ($purok && $purok->assigned_staff_id) {
+            $occupant = User::find($purok->assigned_staff_id);
+            if ($occupant && $occupant->status === 'active') {
+                return response()->json([
+                    'message' => 'The selected purok already has an assigned staff member.',
+                    'errors'  => ['purok_id' => ['This purok is already occupied. Please choose a different one.']],
+                ], 422);
+            }
+        }
 
         $tempPassword = Hash::make($validated['password']);
 
@@ -187,6 +219,7 @@ class AuthController extends Controller
 
         return [
             'id'                   => $user->id,
+            'staff_id'             => $user->staff_id,
             'name'                 => $user->name,
             'email'                => $user->email,
             'role'                 => $user->role,

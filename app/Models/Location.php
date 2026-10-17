@@ -21,16 +21,24 @@ class Location extends Model
         'contact_person',
         'contact_phone',
         'email',
+        'captain_name',
+        'captain_contact',
+        'captain_email',
         'status',
     ];
 
     protected function casts(): array
     {
         return [
-            'latitude' => 'decimal:7',
+            'latitude'  => 'decimal:7',
             'longitude' => 'decimal:7',
-            'capacity' => 'integer',
+            'capacity'  => 'integer',
         ];
+    }
+
+    public function puroks(): HasMany
+    {
+        return $this->hasMany(Purok::class);
     }
 
     public function resources(): HasMany
@@ -51,5 +59,10 @@ class Location extends Model
     public function teamMembers(): HasMany
     {
         return $this->hasMany(User::class);
+    }
+
+    public function resourceSets(): HasMany
+    {
+        return $this->hasMany(ResourceSet::class);
     }
 }

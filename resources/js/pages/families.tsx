@@ -12,6 +12,7 @@ import {
     Users,
     UserCog,
     Minus,
+    FileUp,
 } from 'lucide-react';
 import { FormEventHandler, useMemo, useState } from 'react';
 
@@ -224,20 +225,26 @@ export default function Families({
     families,
     puroks,
     locations = [],
+    allLocations = [],
     staff = [],
     userRole,
+    filters = {},
 }: {
     families: Family[];
     puroks: Purok[];
     locations: Location[];
+    allLocations: Location[];
     staff: Staff[];
     userRole: string;
+    filters: Record<string, string>;
 }) {
     const [showForm, setShowForm] = useState(false);
     const [editing, setEditing] = useState<Family | null>(null);
     const [deleting, setDeleting] = useState<Family | null>(null);
+    const [qrFamily, setQrFamily] = useState<Family | null>(null);
     const [search, setSearch] = useState('');
     const [selectedStaffId, setSelectedStaffId] = useState('');
+    const [filterLocationId, setFilterLocationId] = useState(filters.location_id ?? '');
 
     const form = useForm<FormData>(emptyForm);
 
@@ -371,34 +378,46 @@ export default function Families({
                     <span>{filteredFamilies.length} registered families</span>
                 </div>
 
-                <div className="flex items-center justify-end gap-3">
-                    <div className="relative">
-                        <UserCog
-                            size={18}
-                            className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-500"
-                        />
+                <div className="flex flex-wrap items-center justify-end gap-3">
+                    {/* Barangay filter — admin only */}
+                    {userRole === 'admin' && (
+                        <select
+                            className="input-field w-48"
+                            value={filterLocationId}
+                            onChange={(e) => setFilterLocationId(e.target.value)}
+                        >
+                            <option value="">All Barangays</option>
+                            {allLocations.map((l) => (
+                                <option key={l.id} value={String(l.id)}>{l.name}</option>
+                            ))}
+                        </select>
+                    )}
 
+                    {/* Staff filter */}
+                    <div className="relative">
+                        <UserCog size={18} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-500" />
                         <select
                             className="input-field appearance-none pr-10 pl-10"
                             value={selectedStaffId}
                             onChange={(e) => setSelectedStaffId(e.target.value)}
                         >
-                            {userRole === 'admin' && (
-                                <option value="">All Staff</option>
-                            )}
-
+                            {userRole === 'admin' && <option value="">All Staff</option>}
                             {staff.map((member) => (
-                                <option key={member.id} value={member.id}>
-                                    {member.name}
-                                </option>
+                                <option key={member.id} value={member.id}>{member.name}</option>
                             ))}
                         </select>
-
-                        <ChevronDown
-                            size={18}
-                            className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-slate-500"
-                        />
+                        <ChevronDown size={18} className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-slate-500" />
                     </div>
+
+                    {/* Import button — admin only */}
+                    {userRole === 'admin' && (
+                        <button
+                            className="btn-secondary flex items-center gap-2 text-sm"
+                            onClick={() => router.visit('/families/import')}
+                        >
+                            <FileUp size={15} /> Import
+                        </button>
+                    )}
 
                     <button
                         className="btn-primary flex items-center justify-center gap-2"
@@ -629,7 +648,7 @@ export default function Families({
                                 placeholder={
                                     editing
                                         ? 'Leave empty to keep current PIN'
-                                        : 'Enter 4–6 digit PIN'
+                                        : 'Enter 4â€“6 digit PIN'
                                 }
                             />
 
@@ -723,7 +742,7 @@ export default function Families({
                             disabled={form.processing}
                         >
                             {form.processing
-                                ? 'Saving…'
+                                ? 'Savingâ€¦'
                                 : editing
                                   ? 'Save Changes'
                                   : 'Add Family'}
@@ -742,3 +761,7 @@ export default function Families({
         </AppLayout>
     );
 }
+
+
+
+

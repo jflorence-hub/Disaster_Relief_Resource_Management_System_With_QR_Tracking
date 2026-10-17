@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Location;
 use App\Models\Resource;
+use App\Models\ResourceSet;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -83,7 +84,7 @@ class ResourceController extends Controller
             )
 
             /*
-             * Disaster filter — matches one of the fixed DISASTER_TYPES values.
+             * Disaster filter - matches one of the fixed DISASTER_TYPES values.
              */
             ->when(
                 $request->string('disaster')->toString(),
@@ -99,7 +100,7 @@ class ResourceController extends Controller
             )
 
             /*
-             * Location filter — Main Warehouse used by default.
+             * Location filter - Main Warehouse used by default.
              */
             ->when(
                 $selectedLocationId !== null,
@@ -108,11 +109,37 @@ class ResourceController extends Controller
 
             ->orderBy('name')
             ->get();
+
+        // Attach families_coverable to each resource:
+        // how many families the current stock can cover, based on 1 unit per family.
+        // Used as a soft warning indicator — not a save gate.
+        if ($selectedLocationId) {
+            $familyCount = \App\Models\Family::where('status', 'active')
+                ->where('location_id', (int) $selectedLocationId)
+                ->count();
+        } else {
+            $familyCount = 0;
         }
+
+        $resources = $resources->map(function ($r) use ($familyCount) {
+            $r->families_coverable = $familyCount > 0 ? (int) floor($r->quantity / 1) : null;
+            $r->families_at_location = $familyCount;
+            return $r;
+        });
+        }
+
+        $resourceSets = ResourceSet::query()
+            ->with([
+                'items.resource:id,name,unit',
+                'location:id,name',
+            ])
+            ->orderBy('name')
+            ->get();
 
         return Inertia::render('resources', [
             'resources'    => $resources,
             'userRole'     => $user->role,
+            'resourceSets' => $resourceSets,
 
             'locations' => Location::select('id', 'name')
                 ->when(!$isAdmin && $user->location_id, fn ($q) => $q->whereKey($user->location_id))
@@ -120,7 +147,7 @@ class ResourceController extends Controller
                 ->get(),
 
             /*
-             * Fixed list of disaster types — no DB query needed.
+             * Fixed list of disaster types - no DB query needed.
              */
             'disasterTypes' => self::DISASTER_TYPES,
 

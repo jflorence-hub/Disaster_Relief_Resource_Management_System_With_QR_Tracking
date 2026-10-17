@@ -14,9 +14,15 @@ class Purok extends Model
     protected $fillable = [
         'name',
         'code',
+        'location_id',
         'assigned_staff_id',
         'status',
     ];
+
+    public function location(): BelongsTo
+    {
+        return $this->belongsTo(Location::class);
+    }
 
     public function assignedStaff(): BelongsTo
     {

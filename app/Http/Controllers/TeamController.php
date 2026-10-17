@@ -3,14 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\Location;
+use App\Models\Purok;
 use App\Models\User;
 use App\Services\StaffApprovalService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Inertia\Inertia;
 use Inertia\Response;
-use App\Models\Purok;
 
 class TeamController extends Controller
 {
@@ -41,51 +43,112 @@ class TeamController extends Controller
             ->get(['id', 'name', 'email', 'phone', 'purok_id', 'location_id', 'created_at']);
 
         return Inertia::render('team-management', [
-            'members' => $members,
+            'members'      => $members,
             'pendingStaff' => $pendingStaff,
-            'locations' => Location::select('id', 'name')->orderBy('name')->get(),
-            'filters' => $request->only(['search', 'role', 'status']),
-            'puroks' => Purok::select('id', 'name', 'code')
-                     ->where('status', 'active')
-                     ->orderBy('name')
-                     ->get(),
+            'locations'    => Location::select('id', 'name')->orderBy('name')->get(),
+            'filters'      => $request->only(['search', 'role', 'status']),
+            'puroks'       => Purok::select('id', 'name', 'code', 'location_id', 'assigned_staff_id')
+                ->where('status', 'active')
+                ->orderBy('name')
+                ->get(),
         ]);
     }
 
+    /**
+     * Admin manually creates a staff account.
+     *
+     * The account is immediately active and the chosen purok is assigned.
+     * A welcome e-mail is sent with the temporary password.
+     */
     public function store(Request $request): RedirectResponse
     {
         $data = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|max:255|unique:users,email',
-            'password' => 'required|string|min:8',
-            'role' => 'required|in:admin,staff',
-            'phone' => 'nullable|string|max:50',
-            'status' => 'required|in:active,on_leave,inactive',
-            'location_id' => 'nullable|exists:locations,id',
+            'name'             => 'required|string|max:255',
+            'email'            => 'required|email|max:255|unique:users,email',
+            'password'         => 'required|string|min:8',
+            'role'             => 'required|in:admin,staff',
+            'phone'            => 'nullable|string|max:50',
+            'status'           => 'required|in:active,on_leave,inactive',
+            'location_id'      => 'nullable|exists:locations,id',
             'responsibilities' => 'nullable|string|max:255',
-            'purok_id' => 'nullable|exists:puroks,id',
+            'purok_id'         => 'nullable|exists:puroks,id',
+            'birthdate'        => 'nullable|date',
+            'home_address'     => 'nullable|string|max:500',
         ]);
 
+        // Ensure the chosen purok belongs to the chosen location (prevents cross-barangay assignment)
+        if (! empty($data['purok_id']) && ! empty($data['location_id'])) {
+            $purokBelongs = Purok::where('id', $data['purok_id'])
+                ->where('location_id', $data['location_id'])
+                ->exists();
+            if (! $purokBelongs) {
+                return back()->withErrors([
+                    'purok_id' => 'The selected purok does not belong to the chosen location.',
+                ])->withInput();
+            }
+        }
+
+        $plainPassword    = $data['password'];
         $data['password'] = Hash::make($data['password']);
 
-        User::create($data);
+        // Staff created by admin are immediately active and must change password on first login
+        if ($data['role'] === 'staff') {
+            $data['status']               = 'active';
+            $data['must_change_password'] = true;
+        }
 
-        return back()->with('success', 'Team member added successfully.');
+        $user = User::create($data);
+
+        // Assign this user to the chosen purok
+        if (! empty($data['purok_id'])) {
+            Purok::where('id', $data['purok_id'])
+                ->update(['assigned_staff_id' => $user->id]);
+        }
+
+        // Send welcome e-mail for staff accounts
+        if ($user->role === 'staff') {
+            $this->sendWelcomeEmail($user, $plainPassword);
+        }
+
+        return back()->with('success', 'Staff account created successfully.');
     }
 
+    /**
+     * Update an existing team member's details.
+     *
+     * When a staff member is deactivated their purok assignment is cleared so
+     * the purok becomes available again for new registrations.
+     */
     public function update(Request $request, User $user): RedirectResponse
     {
         $data = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|max:255|unique:users,email,'.$user->id,
-            'password' => 'nullable|string|min:8',
-            'role' => 'required|in:admin,staff',
-            'phone' => 'nullable|string|max:50',
-            'status' => 'required|in:active,on_leave,inactive',
-            'location_id' => 'nullable|exists:locations,id',
+            'name'             => 'required|string|max:255',
+            'email'            => 'required|email|max:255|unique:users,email,' . $user->id,
+            'password'         => 'nullable|string|min:8',
+            'role'             => 'required|in:admin,staff',
+            'phone'            => 'nullable|string|max:50',
+            'status'           => 'required|in:active,on_leave,inactive',
+            'location_id'      => 'nullable|exists:locations,id',
             'responsibilities' => 'nullable|string|max:255',
-            'purok_id' => 'nullable|exists:puroks,id',
+            'purok_id'         => 'nullable|exists:puroks,id',
+            'birthdate'        => 'nullable|date',
+            'home_address'     => 'nullable|string|max:500',
         ]);
+
+        // Ensure the chosen purok belongs to the chosen location (prevents cross-barangay assignment)
+        if (! empty($data['purok_id']) && ! empty($data['location_id'])) {
+            $purokBelongs = Purok::where('id', $data['purok_id'])
+                ->where('location_id', $data['location_id'])
+                ->exists();
+            if (! $purokBelongs) {
+                return back()->withErrors([
+                    'purok_id' => 'The selected purok does not belong to the chosen location.',
+                ])->withInput();
+            }
+        }
+
+        $wasActive     = $user->status === 'active';
+        $isDeactivated = in_array($data['status'], ['inactive', 'on_leave'], true) && $wasActive;
 
         if (! empty($data['password'])) {
             $data['password'] = Hash::make($data['password']);
@@ -93,7 +156,26 @@ class TeamController extends Controller
             unset($data['password']);
         }
 
+        $oldPurokId = $user->purok_id;
         $user->update($data);
+
+        // Purok changed: release old purok, assign new one
+        if ($oldPurokId && (string) $oldPurokId !== (string) ($data['purok_id'] ?? '')) {
+            Purok::where('id', $oldPurokId)
+                ->where('assigned_staff_id', $user->id)
+                ->update(['assigned_staff_id' => null]);
+        }
+
+        if (! empty($data['purok_id'])) {
+            Purok::where('id', $data['purok_id'])
+                ->update(['assigned_staff_id' => $user->id]);
+        }
+
+        // Staff deactivated → free their purok
+        if ($isDeactivated) {
+            Purok::where('assigned_staff_id', $user->id)
+                ->update(['assigned_staff_id' => null]);
+        }
 
         return back()->with('success', 'Team member updated successfully.');
     }
@@ -103,6 +185,10 @@ class TeamController extends Controller
         if ($request->user()->id === $user->id) {
             return back()->with('error', 'You cannot remove your own account.');
         }
+
+        // Free the purok before deleting
+        Purok::where('assigned_staff_id', $user->id)
+            ->update(['assigned_staff_id' => null]);
 
         $user->delete();
 
@@ -117,6 +203,12 @@ class TeamController extends Controller
 
         $this->approvalService->approve($user);
 
+        // Assign purok after approval
+        if ($user->purok_id) {
+            Purok::where('id', $user->purok_id)
+                ->update(['assigned_staff_id' => $user->id]);
+        }
+
         return back()->with('success', 'Staff member approved and notified.');
     }
 
@@ -129,5 +221,36 @@ class TeamController extends Controller
         $this->approvalService->reject($user);
 
         return back()->with('success', 'Registration request rejected.');
+    }
+
+    // --- Private helpers -----------------------------------------------------
+
+    private function sendWelcomeEmail(User $user, string $plainPassword): void
+    {
+        $user->loadMissing(['location:id,name', 'purok:id,name']);
+        $locationName = $user->location?->name ?? 'your assigned location';
+        $purokName    = $user->purok?->name    ?? 'your assigned purok';
+
+        try {
+            Mail::raw(
+                "Dear {$user->name},\n\n"
+                . "An administrator has created a staff account for you in the "
+                . "Disaster Relief Resource Management System.\n\n"
+                . "Your login details:\n"
+                . "  Email:    {$user->email}\n"
+                . "  Password: {$plainPassword}\n\n"
+                . "Your assignment:\n"
+                . "  Location: {$locationName}\n"
+                . "  Purok:    {$purokName}\n\n"
+                . "You will be asked to change your password on first login.\n\n"
+                . "Welcome to the team!",
+                function ($message) use ($user) {
+                    $message->to($user->email)
+                        ->subject('Your Staff Account - Disaster Relief System');
+                }
+            );
+        } catch (\Exception $e) {
+            Log::error("Failed to send welcome email to {$user->email}: {$e->getMessage()}");
+        }
     }
 }

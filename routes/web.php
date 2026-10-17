@@ -14,6 +14,8 @@ use App\Http\Controllers\ResourceController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\TeamController;
 use App\Http\Controllers\FamilyController;
+use App\Http\Controllers\FamilyImportController;
+use App\Http\Controllers\ResourceSetController;
 use App\Http\Controllers\StaffMessageController;
 use Illuminate\Support\Facades\Route;
 
@@ -106,6 +108,30 @@ Route::middleware(['auth', 'must.change.password'])->group(function () {
 
         Route::post('team/{user}/approve', [TeamController::class, 'approve'])->name('team.approve');
         Route::post('team/{user}/reject', [TeamController::class, 'reject'])->name('team.reject');
+
+        // Resource Set CRUD (no index route — sets are a prop on the resources page)
+        Route::post('resource-sets', [ResourceSetController::class, 'store'])
+            ->name('resource-sets.store');
+        Route::put('resource-sets/{resourceSet}', [ResourceSetController::class, 'update'])
+            ->name('resource-sets.update');
+        Route::delete('resource-sets/{resourceSet}', [ResourceSetController::class, 'destroy'])
+            ->name('resource-sets.destroy');
+
+        // Stock check endpoint — JSON response, must be before Route::resource('distribution') wildcard
+        Route::post('distribution/check-stock', [DistributionController::class, 'checkStock'])
+            ->name('distribution.check-stock');
+
+        // Distribution exclusion controls
+        Route::post('distribution/{distribution}/exclude', [DistributionController::class, 'exclude'])
+            ->name('distribution.exclude');
+        Route::post('distribution/{distribution}/include', [DistributionController::class, 'include'])
+            ->name('distribution.include');
+
+        // Family import
+        Route::get('families/import', fn() => inertia('import-families'))->name('families.import.page');
+        Route::get('families/import/template', [FamilyImportController::class, 'template'])->name('families.import.template');
+        Route::post('families/import/preview', [FamilyImportController::class, 'preview'])->name('families.import.preview');
+        Route::post('families/import', [FamilyImportController::class, 'import'])->name('families.import');
 
         Route::get('settings', [SettingController::class, 'index'])->name('settings.index');
         Route::patch('settings/profile', [SettingController::class, 'updateProfile'])->name('settings.profile');

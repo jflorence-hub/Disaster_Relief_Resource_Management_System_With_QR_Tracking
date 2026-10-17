@@ -74,6 +74,8 @@ export interface ResourceItem {
     notes: string | null;
     disaster: string | null;
     status: 'in_stock' | 'low_stock' | 'out_of_stock';
+    families_coverable?: number | null;
+    families_at_location?: number | null;
 }
 
 export interface Distribution {
@@ -105,6 +107,12 @@ export interface Distribution {
     additional_resource?: { id: number; name: string; unit: string } | null;
     location?: { id: number; name: string } | null;
     distributor?: { id: number; name: string } | null;
+    assignment_mode?: 'set' | 'individual' | null;
+    resource_set_id?: number | null;
+    resource_set?: ResourceSet | null;
+    items?: DistributionItem[];
+    excluded?: boolean;
+    exclusion_reason?: string | null;
 }
 
 export interface QrScan {
@@ -170,6 +178,7 @@ export interface FamilyOption {
 
 export interface TeamMember {
     id: number;
+    staff_id: string | null;
     name: string;
     email: string;
     role: 'admin' | 'staff';
@@ -178,6 +187,8 @@ export interface TeamMember {
     location_id: number | null;
     responsibilities: string | null;
     purok_id: number;
+    birthdate: string | null;
+    home_address: string | null;
     location?: { id: number; name: string } | null;
     purok?: { id: number; name: string } | null;
 }
@@ -193,3 +204,40 @@ export interface PendingStaff {
     location: { id: number; name: string } | null;
     created_at: string;
 }
+
+export interface ResourceSetItem {
+    id: number;
+    resource_set_id: number;
+    resource_id: number;
+    quantity: number;
+    resource?: { id: number; name: string; unit: string } | null;
+}
+
+export interface ResourceSet {
+    id: number;
+    name: string;
+    description: string | null;
+    location_id: number | null;
+    disaster: string | null;
+    created_by: number | null;
+    items?: ResourceSetItem[];
+    location?: { id: number; name: string } | null;
+}
+
+export interface DistributionItem {
+    id: number;
+    distribution_id: number;
+    resource_id: number;
+    quantity: number;
+    resource?: { id: number; name: string; unit: string } | null;
+}
+
+export interface StockWarning {
+    resource_id: number;
+    resource_name: string;
+    unit: string;
+    available: number;
+    required: number;
+    shortfall: number;
+}
+

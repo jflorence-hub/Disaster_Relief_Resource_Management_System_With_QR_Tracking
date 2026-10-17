@@ -31,6 +31,8 @@ interface FormData {
     location_id: string;
     purok_id: string;
     responsibilities: string;
+    birthdate: string;
+    home_address: string;
 }
 
 const emptyForm: FormData = {
@@ -43,7 +45,11 @@ const emptyForm: FormData = {
     location_id: '',
     purok_id: '',
     responsibilities: '',
+    birthdate: '',
+    home_address: '',
 };
+
+type PurokOption = { id: number; name: string; code: string; location_id: number | null; assigned_staff_id: number | null };
 
 export default function TeamManagement({
     members,
@@ -53,7 +59,7 @@ export default function TeamManagement({
 }: {
     members: TeamMember[];
     locations: Location[];
-    puroks: { id: number; name: string; code: string }[];
+    puroks: PurokOption[];
     pendingStaff: PendingStaff[];
 }) {
     const [showForm, setShowForm] = useState(false);
@@ -62,6 +68,13 @@ export default function TeamManagement({
     const [filterLocation, setFilterLocation] = useState<string>('');
 
     const form = useForm<FormData>(emptyForm);
+
+    // Puroks filtered to the location chosen in the form — recomputed on every location change
+    const formPuroks = useMemo(() => {
+        if (!form.data.location_id) return puroks;
+        // Only show puroks that explicitly belong to the selected location
+        return puroks.filter((p) => String(p.location_id) === form.data.location_id);
+    }, [puroks, form.data.location_id]);
 
     // Filter + sort by purok_id ascending when a location is selected
     const visibleMembers = useMemo(() => {
@@ -90,6 +103,8 @@ export default function TeamManagement({
             location_id: member.location_id ? String(member.location_id) : '',
             purok_id: member.purok_id ? String(member.purok_id) : '',
             responsibilities: member.responsibilities ?? '',
+            birthdate: member.birthdate ?? '',
+            home_address: member.home_address ?? '',
         });
         setShowForm(true);
     };
@@ -167,9 +182,9 @@ export default function TeamManagement({
                                         <p className="font-medium text-slate-800">{m.name}</p>
                                         <p className="text-xs text-slate-400">{m.email}</p>
                                     </td>
-                                    <td className="px-4 py-3 text-slate-500">{m.phone ?? '—'}</td>
-                                    <td className="px-4 py-3 text-slate-600">{m.location?.name ?? '—'}</td>
-                                    <td className="px-4 py-3 text-slate-600">{m.purok?.name ?? '—'}</td>
+                                    <td className="px-4 py-3 text-slate-500">{m.phone ?? 'â€”'}</td>
+                                    <td className="px-4 py-3 text-slate-600">{m.location?.name ?? 'â€”'}</td>
+                                    <td className="px-4 py-3 text-slate-600">{m.purok?.name ?? 'â€”'}</td>
                                     <td className="px-4 py-3 text-slate-500">
                                         {new Date(m.created_at).toLocaleDateString()}
                                     </td>
@@ -209,6 +224,7 @@ export default function TeamManagement({
                     <thead>
                         <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs text-slate-500 uppercase">
                             <th className="px-4 py-3">Name</th>
+                            <th className="px-4 py-3">Staff ID</th>
                             <th className="px-4 py-3">Role</th>
                             <th className="px-4 py-3">Location</th>
                             <th className="px-4 py-3">Purok</th>
@@ -221,7 +237,7 @@ export default function TeamManagement({
                         {visibleMembers.length === 0 && (
                             <tr>
                                 <td
-                                    colSpan={7}
+                                    colSpan={8}
                                     className="px-4 py-10 text-center text-slate-400"
                                 >
                                     {filterLocation ? 'No team members at this location.' : 'No team members yet.'}
@@ -249,6 +265,15 @@ export default function TeamManagement({
                                     </div>
                                 </td>
                                 <td className="px-4 py-3">
+                                    {m.staff_id ? (
+                                        <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">
+                                            {m.staff_id}
+                                        </span>
+                                    ) : (
+                                        <span className="text-xs text-slate-300">—</span>
+                                    )}
+                                </td>
+                                <td className="px-4 py-3">
                                     <span
                                         className={`badge ${roleBadge[m.role]} capitalize`}
                                     >
@@ -256,13 +281,13 @@ export default function TeamManagement({
                                     </span>
                                 </td>
                                 <td className="px-4 py-3 text-slate-600">
-                                    {m.location?.name ?? '—'}
+                                    {m.location?.name ?? 'â€”'}
                                 </td>
                                 <td className="px-4 py-3 text-slate-600">
-                                    {m.purok?.name ?? '—'}
+                                    {m.purok?.name ?? 'â€”'}
                                 </td>
                                 <td className="px-4 py-3 text-slate-500">
-                                    {m.phone ?? '—'}
+                                    {m.phone ?? 'â€”'}
                                 </td>
                                 <td className="px-4 py-3">
                                     <span
@@ -275,12 +300,36 @@ export default function TeamManagement({
                                     <div className="flex justify-end gap-1.5">
                                         <button
                                             className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+                                            title="Edit"
                                             onClick={() => openEdit(m)}
                                         >
                                             <Pencil size={15} />
                                         </button>
+                                        {m.status === 'active' && (
+                                            <button
+                                                className="rounded-lg px-2 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50"
+                                                title="Deactivate"
+                                                onClick={() => {
+                                                    if (window.confirm(`Deactivate "${m.name}"? Their purok will be freed.`)) {
+                                                        router.put(`/team/${m.id}`, {
+                                                            ...m,
+                                                            status: 'inactive',
+                                                            location_id: m.location_id ?? '',
+                                                            purok_id: m.purok_id ?? '',
+                                                            password: '',
+                                                            responsibilities: m.responsibilities ?? '',
+                                                            birthdate: m.birthdate ?? '',
+                                                            home_address: m.home_address ?? '',
+                                                        });
+                                                    }
+                                                }}
+                                            >
+                                                Deactivate
+                                            </button>
+                                        )}
                                         <button
                                             className="rounded-lg p-1.5 text-red-500 hover:bg-red-50"
+                                            title="Delete"
                                             onClick={() => setDeleting(m)}
                                         >
                                             <Trash2 size={15} />
@@ -301,6 +350,17 @@ export default function TeamManagement({
             >
                 <form onSubmit={submit} className="space-y-4">
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        {editing?.staff_id && (
+                            <div className="sm:col-span-2">
+                                <label className="label">Staff ID</label>
+                                <div className="input-field flex cursor-not-allowed items-center gap-2 bg-slate-50 text-slate-500">
+                                    <span className="rounded bg-slate-200 px-2 py-0.5 font-mono text-xs">
+                                        {editing.staff_id}
+                                    </span>
+                                    <span className="text-xs text-slate-400">Auto-generated · read-only</span>
+                                </div>
+                            </div>
+                        )}
                         <div>
                             <label className="label">Full name</label>
                             <input
@@ -415,27 +475,26 @@ export default function TeamManagement({
 
                         <div>
                             <label className="label">Assigned Purok</label>
-
                             <select
                                 className="input-field"
                                 value={form.data.purok_id}
-                                onChange={(e) =>
-                                    form.setData('purok_id', e.target.value)
-                                }
+                                onChange={(e) => form.setData('purok_id', e.target.value)}
                             >
                                 <option value="">Unassigned</option>
-
-                                {puroks.map((purok) => (
-                                    <option key={purok.id} value={purok.id}>
-                                        {purok.name}
-                                    </option>
-                                ))}
+                                {formPuroks.map((purok) => {
+                                    // A purok is occupied if it has an assigned_staff_id that is NOT the user being edited
+                                    const isOccupied =
+                                        purok.assigned_staff_id !== null &&
+                                        purok.assigned_staff_id !== editing?.id;
+                                    return (
+                                        <option key={purok.id} value={purok.id} disabled={isOccupied}>
+                                            {purok.name}{isOccupied ? ' — occupied' : ''}
+                                        </option>
+                                    );
+                                })}
                             </select>
-
                             {form.errors.purok_id && (
-                                <p className="mt-1 text-xs text-red-600">
-                                    {form.errors.purok_id}
-                                </p>
+                                <p className="mt-1 text-xs text-red-600">{form.errors.purok_id}</p>
                             )}
                         </div>
                         <div>
@@ -444,12 +503,28 @@ export default function TeamManagement({
                                 className="input-field"
                                 placeholder="e.g. Warehouse coordinator"
                                 value={form.data.responsibilities}
-                                onChange={(e) =>
-                                    form.setData(
-                                        'responsibilities',
-                                        e.target.value,
-                                    )
-                                }
+                                onChange={(e) => form.setData('responsibilities', e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <label className="label">Date of birth</label>
+                            <input
+                                type="date"
+                                className="input-field"
+                                value={form.data.birthdate}
+                                onChange={(e) => form.setData('birthdate', e.target.value)}
+                            />
+                            {form.errors.birthdate && (
+                                <p className="mt-1 text-xs text-red-600">{form.errors.birthdate}</p>
+                            )}
+                        </div>
+                        <div className="sm:col-span-2">
+                            <label className="label">Home address</label>
+                            <input
+                                className="input-field"
+                                placeholder="Street, Barangay, City"
+                                value={form.data.home_address}
+                                onChange={(e) => form.setData('home_address', e.target.value)}
                             />
                         </div>
                     </div>
@@ -467,7 +542,7 @@ export default function TeamManagement({
                             disabled={form.processing}
                         >
                             {form.processing
-                                ? 'Saving…'
+                                ? 'Savingâ€¦'
                                 : editing
                                   ? 'Save changes'
                                   : 'Add member'}
@@ -485,3 +560,13 @@ export default function TeamManagement({
         </AppLayout>
     );
 }
+
+
+
+
+
+
+
+
+
+
