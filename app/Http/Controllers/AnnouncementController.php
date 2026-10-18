@@ -31,19 +31,18 @@ class AnnouncementController extends Controller
 
     /**
      * Create a new announcement.
-     * Supports audience: everyone, staff, family, barangay.
+     * Supports audience: everyone, staff, family. location_id is an optional barangay scope.
      */
     public function store(Request $request): RedirectResponse
     {
         $data = $request->validate([
             'title'       => ['required', 'string', 'max:255'],
             'body'        => ['required', 'string'],
-            'audience'    => ['required', 'in:family,staff,everyone,barangay'],
-            'location_id' => ['nullable', 'exists:locations,id', 'required_if:audience,barangay'],
+            'audience'    => ['required', 'in:family,staff,everyone'],
+            'location_id' => ['nullable', 'exists:locations,id'],
         ]);
 
-        $data['sent_by']     = $request->user()?->id;
-        $data['location_id'] = $data['audience'] === 'barangay' ? ($data['location_id'] ?? null) : null;
+        $data['sent_by'] = $request->user()?->id;
 
         Announcement::create($data);
 

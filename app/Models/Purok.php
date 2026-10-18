@@ -6,10 +6,21 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 class Purok extends Model
 {
     use HasFactory;
+
+    protected static function booted(): void
+    {
+        static::creating(function (Purok $purok) {
+            if (empty($purok->code)) {
+                $prefix = $purok->location_id ? "LOC-{$purok->location_id}-" : '';
+                $purok->code = $prefix . Str::upper(Str::slug($purok->name, '-'));
+            }
+        });
+    }
 
     protected $fillable = [
         'name',

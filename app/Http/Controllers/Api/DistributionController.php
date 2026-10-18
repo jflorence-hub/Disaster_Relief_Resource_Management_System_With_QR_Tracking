@@ -25,7 +25,7 @@ class DistributionController extends Controller
             'resource:id,name,unit',
             'additionalResource:id,name,unit',
             'location:id,name',
-            'family:id,family_id,family_name,head_name,phone,household_member,purok_id,location_id,qr_code',
+            'family:id,family_id,head_name,phone,household_member,purok_id,location_id,qr_code',
             'family.purok:id,name',
             'family.location:id,name',
         ])->where('qr_code', $qr)->first();
@@ -78,7 +78,7 @@ class DistributionController extends Controller
             'resource:id,name,unit',
             'additionalResource:id,name,unit',
             'location:id,name',
-            'family:id,family_id,family_name,head_name,purok_id',
+            'family:id,family_id,head_name,purok_id',
             'family.purok:id,name',
             'distributor:id,name',
         ])

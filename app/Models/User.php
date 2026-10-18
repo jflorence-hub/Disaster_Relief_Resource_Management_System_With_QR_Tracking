@@ -32,7 +32,7 @@ use Illuminate\Support\Carbon;
  */
 #[Fillable([
     'name', 'email', 'password', 'role', 'phone', 'status',
-    'location_id', 'purok_id', 'responsibilities',
+    'location_id', 'purok_id', 'preferred_purok_ids', 'responsibilities',
     'avatar', 'reset_code_hash', 'reset_code_expires_at',
     'must_change_password', 'staff_id', 'birthdate', 'home_address',
 ])]
@@ -80,6 +80,7 @@ class User extends Authenticatable
             'reset_code_expires_at' => 'datetime',
             'must_change_password'  => 'boolean',
             'birthdate'             => 'date',
+            'preferred_purok_ids'   => 'array',
         ];
     }
 }

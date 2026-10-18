@@ -17,11 +17,10 @@ export interface FamilyMember {
 export interface FamilyModel {
     id: number;
     family_id: string;
-    family_name: string;
     head_name: string;
+    email?: string | null;
     phone?: string | null;
     household_member: number;
-    address?: string | null;
     purok_id: number;
     location_id?: number | null;
     pin?: string;
@@ -76,6 +75,9 @@ export interface ResourceItem {
     status: 'in_stock' | 'low_stock' | 'out_of_stock';
     families_coverable?: number | null;
     families_at_location?: number | null;
+    is_expired?: boolean;
+    expiring_soon?: boolean;
+    days_until_expiry?: number | null;
 }
 
 export interface Distribution {
@@ -83,7 +85,6 @@ export interface Distribution {
     family?: {
         id: number;
         family_id: string;
-        family_name: string;
         head_name: string;
         phone?: string | null;
         household_member: number;
@@ -142,7 +143,6 @@ export interface QrScan {
     family?: {
         id: number;
         family_id: string;
-        family_name: string;
         head_name: string;
         purok?: string | null;
     } | null;
@@ -164,7 +164,6 @@ export interface QrScan {
 export interface FamilyOption {
     id: number;
     family_id: string;
-    family_name: string;
     head_name: string;
     purok?: string | null;
     latest_distribution?: {
@@ -202,6 +201,7 @@ export interface PendingStaff {
     purok: { id: number; name: string } | null;
     location_id: number | null;
     location: { id: number; name: string } | null;
+    preferred_purok_ids: number[] | null;
     created_at: string;
 }
 
@@ -220,6 +220,8 @@ export interface ResourceSet {
     location_id: number | null;
     disaster: string | null;
     created_by: number | null;
+    num_sets?: number;
+    sets_remaining?: number | null;
     items?: ResourceSetItem[];
     location?: { id: number; name: string } | null;
 }
@@ -240,4 +242,3 @@ export interface StockWarning {
     required: number;
     shortfall: number;
 }
-

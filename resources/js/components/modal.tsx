@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { PropsWithChildren } from 'react';
+import { PropsWithChildren, useEffect } from 'react';
 
 export default function Modal({
     open,
@@ -8,12 +8,22 @@ export default function Modal({
     children,
     wide = false,
 }: PropsWithChildren<{ open: boolean; onClose: () => void; title: string; wide?: boolean }>) {
+    useEffect(() => {
+        if (!open) return;
+        const handleKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose();
+        };
+        document.addEventListener('keydown', handleKey);
+        return () => document.removeEventListener('keydown', handleKey);
+    }, [open, onClose]);
+
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
             <div
                 className={`max-h-[90vh] w-full ${wide ? 'max-w-2xl' : 'max-w-md'} overflow-y-auto rounded-xl bg-white shadow-xl`}
+                onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
                     <h2 className="text-base font-semibold text-slate-800">{title}</h2>

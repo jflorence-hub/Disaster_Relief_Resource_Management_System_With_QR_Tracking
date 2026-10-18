@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Family;
+use App\Models\Location;
+use App\Models\Purok;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -16,11 +18,9 @@ class FamilyAuthController extends Controller
     public function register(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'family_name'    => 'required|string|max:255',
             'head_name'      => 'required|string|max:255',
             'email'          => 'required|email|max:255|unique:families,email',
             'phone'          => 'required|string|max:50|regex:/^09[0-9]{9}$/|unique:families,phone',
-            'address'        => 'required|string|max:2000',
             'household_member' => 'required|integer|min:1|max:100',
             'purok_id'       => 'required|exists:puroks,id',
             'location_id'    => 'required|exists:locations,id',
@@ -28,6 +28,23 @@ class FamilyAuthController extends Controller
             'member_names'   => 'required|array|min:1',
             'member_names.*' => 'required|string|max:255',
         ]);
+
+        if (! Location::whereKey($data['location_id'])->where('status', 'active')->exists()) {
+            return response()->json([
+                'message' => 'The selected barangay is not active.',
+                'errors' => ['location_id' => ['Select an active barangay.']],
+            ], 422);
+        }
+
+        if (! Purok::whereKey($data['purok_id'])
+            ->where('location_id', $data['location_id'])
+            ->where('status', 'active')
+            ->exists()) {
+            return response()->json([
+                'message' => 'The selected purok does not belong to the selected barangay.',
+                'errors' => ['purok_id' => ['Select a purok in the selected barangay.']],
+            ], 422);
+        }
 
         // Check head_name against existing Family heads (case-insensitive).
         if (\App\Models\Family::whereRaw('LOWER(TRIM(head_name)) = ?', [strtolower(trim($data['head_name']))])->exists()) {
@@ -53,23 +70,13 @@ class FamilyAuthController extends Controller
         }
 
         $data['email'] = strtolower(trim($data['email']));
-        $maxId = (int) (Family::max('id') ?? 0);
-        $familyId = 'FAM-' . str_pad((string) ($maxId + 1), 4, '0', STR_PAD_LEFT);
-        while (Family::where('family_id', $familyId)->exists()) {
-            $maxId++;
-            $familyId = 'FAM-' . str_pad((string) $maxId, 4, '0', STR_PAD_LEFT);
-        }
-
         $family = Family::create([
-            'family_name'      => $data['family_name'],
             'head_name'        => $data['head_name'],
             'email'            => $data['email'],
             'phone'            => $data['phone'],
-            'address'          => $data['address'],
             'household_member' => count($data['member_names']),
             'purok_id'         => $data['purok_id'],
             'location_id'      => $data['location_id'],
-            'family_id'        => $familyId,
             'pin'              => Hash::make($data['pin']),
             'status'           => 'active',
         ]);
@@ -92,20 +99,22 @@ class FamilyAuthController extends Controller
     {
         $data = $request->validate([
             'identifier' => 'nullable|string|max:255',
+            'email' => 'nullable|email|max:255',
             'phone' => 'nullable|string|max:50',
-            'family_id' => 'nullable|string|max:255',
             'pin' => 'required|string',
         ]);
-        $identifier = trim((string) ($data['phone'] ?? $data['identifier'] ?? $data['family_id'] ?? ''));
+        $identifier = trim((string) ($data['identifier'] ?? $data['email'] ?? $data['phone'] ?? ''));
         if ($identifier === '') {
-            return response()->json(['message' => 'Enter your registered phone number or Family ID.'], 422);
+            return response()->json(['message' => 'Enter your registered email or phone number.'], 422);
         }
         $family = Family::with(['location:id,name', 'purok:id,name'])
-            ->where(fn ($q) => $q->where('phone', $identifier)->orWhere('family_id', $identifier))
+            ->where(fn ($q) => $q
+                ->where('phone', $identifier)
+                ->orWhereRaw('LOWER(email) = ?', [strtolower($identifier)]))
             ->first();
 
         if (!$family || !Hash::check($data['pin'], $family->pin)) {
-            return response()->json(['message' => 'Invalid phone number / Family ID or PIN.'], 401);
+            return response()->json(['message' => 'Invalid email / phone number or PIN.'], 401);
         }
         if ($family->status !== 'active') {
             return response()->json(['message' => 'This family account is not active. Please contact the administrator.'], 403);
@@ -141,7 +150,7 @@ class FamilyAuthController extends Controller
     public function forgotPassword(Request $request): JsonResponse
     {
         $data = $request->validate(['email' => 'required|email']);
-        $family = Family::where('email', strtolower(trim($data['email'])))->first();
+        $family = Family::whereRaw('LOWER(email) = ?', [strtolower(trim($data['email']))])->first();
         // Do not disclose whether an email is registered.
         if (!$family) return response()->json(['message' => 'If this email belongs to an active family account, a reset code has been sent.']);
         $code = (string) random_int(100000, 999999);
@@ -161,7 +170,7 @@ class FamilyAuthController extends Controller
             'email' => 'required|email', 'otp' => 'required|digits:6',
             'password' => ['required', 'string', 'regex:/^[0-9]{4,6}$/', 'confirmed'],
         ]);
-        $family = Family::where('email', strtolower(trim($data['email'])))->first();
+        $family = Family::whereRaw('LOWER(email) = ?', [strtolower(trim($data['email']))])->first();
         if (!$family || !$family->reset_code_hash || !$family->reset_code_expires_at || Carbon::parse($family->reset_code_expires_at)->isPast() || !Hash::check($data['otp'], $family->reset_code_hash)) {
             return response()->json(['message' => 'The reset code is invalid or expired. Request a new code.'], 422);
         }
@@ -176,9 +185,9 @@ class FamilyAuthController extends Controller
     {
         return [
             'id' => $family->id, 'family_id' => $family->family_id,
-            'family_name' => $family->family_name, 'head_name' => $family->head_name,
+            'head_name' => $family->head_name,
             'phone' => $family->phone, 'email' => $family->email,
-            'household_member' => $family->household_member, 'address' => $family->address,
+            'household_member' => $family->household_member,
             'purok_id' => $family->purok_id, 'location_id' => $family->location_id,
             'purok' => $family->purok ? ['id' => $family->purok->id, 'name' => $family->purok->name] : null,
             'location' => $family->location ? ['id' => $family->location->id, 'name' => $family->location->name] : null,

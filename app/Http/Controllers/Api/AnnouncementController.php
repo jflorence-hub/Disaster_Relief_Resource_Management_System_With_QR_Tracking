@@ -10,12 +10,19 @@ use Illuminate\Http\Request;
 class AnnouncementController extends Controller
 {
     /**
-     * Announcements for staff: returns 'staff' and 'everyone' audience rows.
+     * Announcements for staff: returns 'staff' and 'everyone' audience rows
+     * scoped to the staff member's barangay (or unscoped rows).
      */
     public function staffIndex(Request $request): JsonResponse
     {
+        $staff = $request->user();
+
         $announcements = Announcement::with('sender:id,name')
             ->whereIn('audience', ['staff', 'everyone'])
+            ->where(function ($q) use ($staff) {
+                $q->whereNull('location_id')
+                  ->orWhere('location_id', $staff?->location_id);
+            })
             ->orderByDesc('created_at')
             ->get();
 
@@ -24,20 +31,18 @@ class AnnouncementController extends Controller
 
     /**
      * Announcements for family/household accounts.
-     * Returns 'family' and 'everyone' rows, plus 'barangay' rows scoped to the
-     * family's registered location.
+     * Returns 'family' and 'everyone' rows scoped to the family's location
+     * (location_id IS NULL or matches the family's registered location).
      */
     public function familyIndex(Request $request): JsonResponse
     {
         $family = $request->user();
 
         $query = Announcement::with('sender:id,name')
+            ->whereIn('audience', ['family', 'everyone'])
             ->where(function ($q) use ($family) {
-                $q->whereIn('audience', ['family', 'everyone'])
-                  ->orWhere(function ($inner) use ($family) {
-                      $inner->where('audience', 'barangay')
-                            ->where('location_id', $family?->location_id);
-                  });
+                $q->whereNull('location_id')
+                  ->orWhere('location_id', $family?->location_id);
             })
             ->orderByDesc('created_at');
 

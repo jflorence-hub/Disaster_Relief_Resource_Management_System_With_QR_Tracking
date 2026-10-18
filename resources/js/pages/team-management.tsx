@@ -66,6 +66,12 @@ export default function TeamManagement({
     const [editing, setEditing] = useState<TeamMember | null>(null);
     const [deleting, setDeleting] = useState<TeamMember | null>(null);
     const [filterLocation, setFilterLocation] = useState<string>('');
+    const [approvingStaff, setApprovingStaff] = useState<PendingStaff | null>(null);
+    const [approveSelectedPurokId, setApproveSelectedPurokId] = useState<string>('');
+    const [rejectingStaff, setRejectingStaff] = useState<PendingStaff | null>(null);
+    const [rejectionReason, setRejectionReason] = useState('');
+    const [approveLoading, setApproveLoading] = useState(false);
+    const [rejectLoading, setRejectLoading] = useState(false);
 
     const form = useForm<FormData>(emptyForm);
 
@@ -127,6 +133,22 @@ export default function TeamManagement({
         });
     };
 
+    const submitApprove = () => {
+        if (!approvingStaff) return;
+        setApproveLoading(true);
+        router.post(`/team/${approvingStaff.id}/approve`, { purok_id: approveSelectedPurokId || null }, {
+            onFinish: () => { setApproveLoading(false); setApprovingStaff(null); setApproveSelectedPurokId(''); },
+        });
+    };
+
+    const submitReject = () => {
+        if (!rejectingStaff) return;
+        setRejectLoading(true);
+        router.post(`/team/${rejectingStaff.id}/reject`, { rejection_reason: rejectionReason }, {
+            onFinish: () => { setRejectLoading(false); setRejectingStaff(null); setRejectionReason(''); },
+        });
+    };
+
     return (
         <AppLayout
             title="Team Management"
@@ -171,6 +193,7 @@ export default function TeamManagement({
                                 <th className="px-4 py-3">Phone</th>
                                 <th className="px-4 py-3">Location</th>
                                 <th className="px-4 py-3">Requested Purok</th>
+                                <th className="px-4 py-3">Preferred Puroks</th>
                                 <th className="px-4 py-3">Registered On</th>
                                 <th className="px-4 py-3 text-right">Actions</th>
                             </tr>
@@ -182,9 +205,18 @@ export default function TeamManagement({
                                         <p className="font-medium text-slate-800">{m.name}</p>
                                         <p className="text-xs text-slate-400">{m.email}</p>
                                     </td>
-                                    <td className="px-4 py-3 text-slate-500">{m.phone ?? 'â€”'}</td>
-                                    <td className="px-4 py-3 text-slate-600">{m.location?.name ?? 'â€”'}</td>
-                                    <td className="px-4 py-3 text-slate-600">{m.purok?.name ?? 'â€”'}</td>
+                                    <td className="px-4 py-3 text-slate-500">{m.phone ?? '—'}</td>
+                                    <td className="px-4 py-3 text-slate-600">{m.location?.name ?? '—'}</td>
+                                    <td className="px-4 py-3 text-slate-600">{m.purok?.name ?? '—'}</td>
+                                    <td className="px-4 py-3 text-slate-500 text-xs">
+                                        {m.preferred_purok_ids && m.preferred_purok_ids.length > 0
+                                            ? puroks
+                                                .filter(p => m.preferred_purok_ids!.includes(p.id))
+                                                .map(p => p.name)
+                                                .join(', ') || '—'
+                                            : <span className="text-slate-400">Any</span>
+                                        }
+                                    </td>
                                     <td className="px-4 py-3 text-slate-500">
                                         {new Date(m.created_at).toLocaleDateString()}
                                     </td>
@@ -193,20 +225,22 @@ export default function TeamManagement({
                                             <button
                                                 className="rounded-lg bg-green-600 px-3 py-1 text-xs font-semibold text-white hover:bg-green-700"
                                                 onClick={() => {
-                                                    if (window.confirm(`Approve registration request from "${m.name}"? Their account will be activated and they will be notified by email.`)) {
-                                                        router.post(`/team/${m.id}/approve`);
-                                                    }
+                                                    setApprovingStaff(m);
+                                                    // Pre-select the first preferred purok that is available
+                                                    const preferred = m.preferred_purok_ids ?? [];
+                                                    const firstAvail = puroks.find(p =>
+                                                        (preferred.length === 0 || preferred.includes(p.id)) &&
+                                                        String(p.location_id) === String(m.location_id) &&
+                                                        p.assigned_staff_id === null
+                                                    );
+                                                    setApproveSelectedPurokId(firstAvail ? String(firstAvail.id) : '');
                                                 }}
                                             >
                                                 Approve
                                             </button>
                                             <button
                                                 className="rounded-lg bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700"
-                                                onClick={() => {
-                                                    if (window.confirm(`Reject registration request from "${m.name}"? This cannot be undone.`)) {
-                                                        router.post(`/team/${m.id}/reject`);
-                                                    }
-                                                }}
+                                                onClick={() => { setRejectingStaff(m); setRejectionReason(''); }}
                                             >
                                                 Reject
                                             </button>
@@ -281,13 +315,13 @@ export default function TeamManagement({
                                     </span>
                                 </td>
                                 <td className="px-4 py-3 text-slate-600">
-                                    {m.location?.name ?? 'â€”'}
+                                    {m.location?.name ?? '—'}
                                 </td>
                                 <td className="px-4 py-3 text-slate-600">
-                                    {m.purok?.name ?? 'â€”'}
+                                    {m.purok?.name ?? '—'}
                                 </td>
                                 <td className="px-4 py-3 text-slate-500">
-                                    {m.phone ?? 'â€”'}
+                                    {m.phone ?? '—'}
                                 </td>
                                 <td className="px-4 py-3">
                                     <span
@@ -542,7 +576,7 @@ export default function TeamManagement({
                             disabled={form.processing}
                         >
                             {form.processing
-                                ? 'Savingâ€¦'
+                                ? 'Saving…'
                                 : editing
                                   ? 'Save changes'
                                   : 'Add member'}
@@ -557,6 +591,118 @@ export default function TeamManagement({
                 onConfirm={confirmDelete}
                 message={`Remove "${deleting?.name}" from the team? This deletes their login account.`}
             />
+
+            {/* Approve Modal */}
+            <Modal
+                open={!!approvingStaff}
+                onClose={() => setApprovingStaff(null)}
+                title="Approve Registration"
+            >
+                {approvingStaff && (
+                    <div className="space-y-4">
+                        <div className="space-y-1 text-sm">
+                            <p><span className="font-medium text-slate-700">Name:</span> <span className="text-slate-600">{approvingStaff.name}</span></p>
+                            <p><span className="font-medium text-slate-700">Email:</span> <span className="text-slate-600">{approvingStaff.email}</span></p>
+                            <p><span className="font-medium text-slate-700">Location:</span> <span className="text-slate-600">{approvingStaff.location?.name ?? '—'}</span></p>
+                            <p><span className="font-medium text-slate-700">Requested Purok:</span> <span className="text-slate-600">{approvingStaff.purok?.name ?? '—'}</span></p>
+                        </div>
+                        <p className="text-sm text-slate-500">
+                            On approval, this account becomes active and is assigned to the requested purok and location.
+                        </p>
+                        {/* Purok assignment selector */}
+                        <div>
+                            <label className="label">Assign purok</label>
+                            <select
+                                className="input-field"
+                                value={approveSelectedPurokId}
+                                onChange={(e) => setApproveSelectedPurokId(e.target.value)}
+                            >
+                                <option value="">— No purok assignment —</option>
+                                {puroks
+                                    .filter(p => String(p.location_id) === String(approvingStaff.location_id))
+                                    .map(p => {
+                                        const isPreferred = approvingStaff.preferred_purok_ids?.includes(p.id);
+                                        const isOccupied  = p.assigned_staff_id !== null;
+                                        return (
+                                            <option key={p.id} value={String(p.id)} disabled={isOccupied}>
+                                                {p.name}
+                                                {isPreferred ? ' ★ preferred' : ''}
+                                                {isOccupied  ? ' — occupied' : ''}
+                                            </option>
+                                        );
+                                    })
+                                }
+                            </select>
+                            {approvingStaff.preferred_purok_ids && approvingStaff.preferred_purok_ids.length > 0 && (
+                                <p className="mt-1 text-xs text-slate-400">
+                                    Preferred: {puroks.filter(p => approvingStaff.preferred_purok_ids!.includes(p.id)).map(p => p.name).join(', ')}
+                                </p>
+                            )}
+                        </div>
+                        <div className="flex justify-end gap-2 pt-2">
+                            <button type="button" className="btn-secondary" onClick={() => setApprovingStaff(null)}>
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                                onClick={submitApprove}
+                                disabled={approveLoading}
+                            >
+                                {approveLoading ? 'Approving…' : 'Confirm Approval'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </Modal>
+
+            {/* Reject Modal */}
+            <Modal
+                open={!!rejectingStaff}
+                onClose={() => { setRejectingStaff(null); setRejectionReason(''); }}
+                title="Reject Registration"
+            >
+                {rejectingStaff && (
+                    <div className="space-y-4">
+                        <div className="space-y-1 text-sm">
+                            <p><span className="font-medium text-slate-700">Name:</span> <span className="text-slate-600">{rejectingStaff.name}</span></p>
+                            <p><span className="font-medium text-slate-700">Email:</span> <span className="text-slate-600">{rejectingStaff.email}</span></p>
+                            <p><span className="font-medium text-slate-700">Location:</span> <span className="text-slate-600">{rejectingStaff.location?.name ?? '—'}</span></p>
+                            <p><span className="font-medium text-slate-700">Requested Purok:</span> <span className="text-slate-600">{rejectingStaff.purok?.name ?? '—'}</span></p>
+                        </div>
+                        <div>
+                            <label htmlFor="rejection-reason" className="label">
+                                Reason for rejection (will be sent to applicant)
+                            </label>
+                            <textarea
+                                id="rejection-reason"
+                                className="input-field min-h-[80px] w-full resize-y"
+                                placeholder="Optional — leave blank for a generic rejection email"
+                                value={rejectionReason}
+                                onChange={(e) => setRejectionReason(e.target.value)}
+                                maxLength={1000}
+                            />
+                        </div>
+                        <div className="flex justify-end gap-2 pt-2">
+                            <button
+                                type="button"
+                                className="btn-secondary"
+                                onClick={() => { setRejectingStaff(null); setRejectionReason(''); }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                                onClick={submitReject}
+                                disabled={rejectLoading}
+                            >
+                                {rejectLoading ? 'Rejecting…' : 'Confirm Rejection'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </Modal>
         </AppLayout>
     );
 }

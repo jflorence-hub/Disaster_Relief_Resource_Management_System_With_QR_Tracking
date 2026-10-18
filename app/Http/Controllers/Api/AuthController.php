@@ -92,11 +92,13 @@ class AuthController extends Controller
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'name'        => 'required|string|max:255',
-            'email'       => 'required|email|unique:users,email',
-            'phone'       => ['nullable', 'regex:/^09[0-9]{9}$/'],
-            'purok_id'    => 'required|exists:puroks,id',
-            'location_id' => 'required|exists:locations,id',
+            'name'                => 'required|string|max:255',
+            'email'               => 'required|email|unique:users,email',
+            'phone'               => ['nullable', 'regex:/^09[0-9]{9}$/'],
+            'purok_id'            => 'nullable|exists:puroks,id',
+            'preferred_purok_ids' => 'nullable|array',
+            'preferred_purok_ids.*' => 'integer|exists:puroks,id',
+            'location_id'         => 'required|exists:locations,id',
             // Complexity: min 8, at least one uppercase, one digit, one special char
             'password'    => [
                 'required',
@@ -120,32 +122,24 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Server-side: purok must not be occupied (prevents race condition)
-        $purok = Purok::find($validated['purok_id']);
-        if ($purok && $purok->assigned_staff_id) {
-            $occupant = User::find($purok->assigned_staff_id);
-            if ($occupant && $occupant->status === 'active') {
-                return response()->json([
-                    'message' => 'The selected purok already has an assigned staff member.',
-                    'errors'  => ['purok_id' => ['This purok is already occupied. Please choose a different one.']],
-                ], 422);
-            }
-        }
+        // purok_id is now optional at registration — the admin assigns it at approval time.
+        // preferred_purok_ids stores the applicant's preferences (or null = no preference).
 
         $tempPassword = Hash::make($validated['password']);
 
         $newStaff = User::create([
-            'name'        => $validated['name'],
-            'email'       => $validated['email'],
-            'phone'       => $validated['phone'] ?? null,
-            'password'    => $tempPassword,
-            'purok_id'    => $validated['purok_id'],
-            'location_id' => $validated['location_id'],
-            'role'        => 'staff',
-            'status'      => 'pending',
+            'name'                => $validated['name'],
+            'email'               => $validated['email'],
+            'phone'               => $validated['phone'] ?? null,
+            'password'            => $tempPassword,
+            'purok_id'            => null,  // assigned at approval time
+            'preferred_purok_ids' => $validated['preferred_purok_ids'] ?? null,
+            'location_id'         => $validated['location_id'],
+            'role'                => 'staff',
+            'status'              => 'pending',
         ]);
 
-        $newStaff->load('purok:id,name');
+        $newStaff->load('location:id,name');
         $this->approvalService->notifyAdmins($newStaff);
 
         return response()->json([

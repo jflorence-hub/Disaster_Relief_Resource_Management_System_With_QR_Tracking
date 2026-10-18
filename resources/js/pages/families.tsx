@@ -20,6 +20,7 @@ interface Purok {
     id: number;
     name: string;
     code?: string;
+    location_id?: number | null;
 }
 
 interface Location {
@@ -38,18 +39,16 @@ interface FamilyMember {
 interface Family {
     id: number;
     family_id: string;
-    family_name: string;
     head_name: string;
+    email?: string | null;
     phone?: string | null;
-    household_member: number;
-    address?: string | null;
+    household_member: number | FamilyMember[];
     purok_id: number;
     location_id?: number | null;
     pin?: string;
     status: string;
     purok?: Purok;
     location?: Location;
-    household_member?: FamilyMember[];
 }
 
 interface Staff {
@@ -59,9 +58,8 @@ interface Staff {
 }
 
 interface FormData {
-    family_id: string;
-    family_name: string;
     head_name: string;
+    email: string;
     phone: string;
     location_id: string;
     purok_id: string;
@@ -72,9 +70,8 @@ interface FormData {
 }
 
 const emptyForm: FormData = {
-    family_id: '',
-    family_name: '',
     head_name: '',
+    email: '',
     phone: '',
     location_id: '',
     purok_id: '',
@@ -111,10 +108,7 @@ function FamilyRow({
                 <td className="px-4 py-3">
                     <div>
                         <p className="font-medium text-slate-800">
-                            {family.family_name}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                            ID: {family.family_id}
+                            {family.family_id}
                         </p>
                     </div>
                 </td>
@@ -131,7 +125,7 @@ function FamilyRow({
                         onClick={() => setExpanded((v) => !v)}
                         title="Show household members"
                     >
-                        <span>{Array.isArray(members) ? members.length : family.household_member}</span>
+                        <span>{memberCount}</span>
                         <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-xs text-blue-600">
                             {memberCount}
                         </span>
@@ -271,8 +265,8 @@ export default function Families({
             result = result.filter((family) =>
                 [
                     family.family_id,
-                    family.family_name,
                     family.head_name,
+                    family.email,
                     family.phone,
                     family.location?.name,
                     family.purok?.name,
@@ -301,9 +295,8 @@ export default function Families({
             : [''];
 
         form.setData({
-            family_id: family.family_id,
-            family_name: family.family_name,
             head_name: family.head_name,
+            email: family.email ?? '',
             phone: family.phone ?? '',
             location_id: family.location_id ? String(family.location_id) : '',
             purok_id: String(family.purok_id),
@@ -439,7 +432,7 @@ export default function Families({
 
                     <input
                         className="input-field pl-10"
-                        placeholder="Search family ID, family name, head, phone, location, or Purok..."
+                        placeholder="Search family ID, head, phone, email, location, or Purok..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                     />
@@ -451,7 +444,7 @@ export default function Families({
                 <table className="w-full text-sm">
                     <thead>
                         <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs text-slate-500 uppercase">
-                            <th className="px-4 py-3">Family</th>
+                            <th className="px-4 py-3">Family ID</th>
                             <th className="px-4 py-3">Head of Family</th>
                             <th className="px-4 py-3">Phone</th>
                             <th className="px-4 py-3">Household Members</th>
@@ -498,26 +491,6 @@ export default function Families({
             >
                 <form onSubmit={submit} className="space-y-4">
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        {/* Family Name */}
-                        <div>
-                            <label className="label">Family Name</label>
-
-                            <input
-                                className="input-field"
-                                value={form.data.family_name}
-                                onChange={(e) =>
-                                    form.setData('family_name', e.target.value)
-                                }
-                                placeholder="e.g. Dela Cruz Family"
-                            />
-
-                            {form.errors.family_name && (
-                                <p className="mt-1 text-xs text-red-600">
-                                    {form.errors.family_name}
-                                </p>
-                            )}
-                        </div>
-
                         {/* Head */}
                         <div>
                             <label className="label">Head of Family</label>
@@ -534,6 +507,26 @@ export default function Families({
                             {form.errors.head_name && (
                                 <p className="mt-1 text-xs text-red-600">
                                     {form.errors.head_name}
+                                </p>
+                            )}
+                        </div>
+
+                        {/* Email */}
+                        <div>
+                            <label className="label">Email</label>
+                            <input
+                                type="email"
+                                className="input-field"
+                                value={form.data.email}
+                                onChange={(e) =>
+                                    form.setData('email', e.target.value)
+                                }
+                                placeholder="Optional"
+                            />
+
+                            {form.errors.email && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.email}
                                 </p>
                             )}
                         </div>
@@ -556,33 +549,6 @@ export default function Families({
                             </p>
                         </div>
 
-                        {/* Purok */}
-                        <div>
-                            <label className="label">Assigned Purok</label>
-
-                            <select
-                                className="input-field"
-                                value={form.data.purok_id}
-                                onChange={(e) =>
-                                    form.setData('purok_id', e.target.value)
-                                }
-                            >
-                                <option value="">Select Purok</option>
-
-                                {puroks.map((purok) => (
-                                    <option key={purok.id} value={purok.id}>
-                                        {purok.name}
-                                    </option>
-                                ))}
-                            </select>
-
-                            {form.errors.purok_id && (
-                                <p className="mt-1 text-xs text-red-600">
-                                    {form.errors.purok_id}
-                                </p>
-                            )}
-                        </div>
-
                         {/* Location */}
                         <div>
                             <label className="label">Location</label>
@@ -591,7 +557,11 @@ export default function Families({
                                 className="input-field"
                                 value={form.data.location_id}
                                 onChange={(e) =>
-                                    form.setData('location_id', e.target.value)
+                                    form.setData({
+                                        ...form.data,
+                                        location_id: e.target.value,
+                                        purok_id: '',
+                                    })
                                 }
                             >
                                 <option value="">Select Location</option>
@@ -609,6 +579,44 @@ export default function Families({
                             {form.errors.location_id && (
                                 <p className="mt-1 text-xs text-red-600">
                                     {form.errors.location_id}
+                                </p>
+                            )}
+                        </div>
+
+                        {/* Purok */}
+                        <div>
+                            <label className="label">Assigned Purok</label>
+
+                            <select
+                                className="input-field"
+                                value={form.data.purok_id}
+                                disabled={!form.data.location_id}
+                                onChange={(e) =>
+                                    form.setData('purok_id', e.target.value)
+                                }
+                            >
+                                <option value="">
+                                    {form.data.location_id
+                                        ? 'Select Purok'
+                                        : 'Select Location first'}
+                                </option>
+
+                                {puroks
+                                    .filter(
+                                        (purok) =>
+                                            String(purok.location_id) ===
+                                            form.data.location_id,
+                                    )
+                                    .map((purok) => (
+                                        <option key={purok.id} value={purok.id}>
+                                            {purok.name}
+                                        </option>
+                                    ))}
+                            </select>
+
+                            {form.errors.purok_id && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.purok_id}
                                 </p>
                             )}
                         </div>
@@ -648,14 +656,13 @@ export default function Families({
                                 placeholder={
                                     editing
                                         ? 'Leave empty to keep current PIN'
-                                        : 'Enter 4â€“6 digit PIN'
+                                        : 'Enter 4–6 digit PIN'
                                 }
                             />
 
                             <p className="mt-1 text-xs text-slate-400">
-                                Families can use their Family ID and PIN to
-                                access the mobile app, even without a cellphone
-                                number.
+                                Families sign in with their email or phone
+                                number and PIN.
                             </p>
 
                             {form.errors.pin && (
@@ -742,7 +749,7 @@ export default function Families({
                             disabled={form.processing}
                         >
                             {form.processing
-                                ? 'Savingâ€¦'
+                                ? 'Saving…'
                                 : editing
                                   ? 'Save Changes'
                                   : 'Add Family'}
@@ -756,12 +763,8 @@ export default function Families({
                 open={!!deleting}
                 onClose={() => setDeleting(null)}
                 onConfirm={confirmDelete}
-                message={`Remove "${deleting?.family_name}" from the registered families? This will also affect their relief distribution records.`}
+                message={`Remove "${deleting?.head_name}" from the registered families? This will also affect their relief distribution records.`}
             />
         </AppLayout>
     );
 }
-
-
-
-

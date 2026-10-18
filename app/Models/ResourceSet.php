@@ -17,6 +17,8 @@ class ResourceSet extends Model
         'location_id',
         'disaster',
         'created_by',
+        'num_sets',
+        'sets_remaining',
     ];
 
     /** Location this set is scoped to. */

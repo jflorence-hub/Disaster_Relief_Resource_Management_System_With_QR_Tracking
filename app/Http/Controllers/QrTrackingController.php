@@ -22,7 +22,7 @@ class QrTrackingController extends Controller
         $scans = QrScan::query()
             ->when(!$isAdmin, fn ($q) => $q->where('scanned_by', $user->id))
             ->with([
-                'family:id,family_id,family_name,head_name,purok_id',
+                'family:id,family_id,head_name,purok_id',
                 'family.purok:id,name',
                 'resource:id,name,qr_code,unit',
                 'location:id,name',
@@ -47,7 +47,6 @@ class QrTrackingController extends Controller
                     'family' => $scan->family ? [
                         'id'          => $scan->family->id,
                         'family_id'   => $scan->family->family_id,
-                        'family_name' => $scan->family->family_name,
                         'head_name'   => $scan->family->head_name,
                         'purok'       => $scan->family->purok?->name,
                     ] : null,
@@ -92,7 +91,7 @@ class QrTrackingController extends Controller
                     ->get([
                         'd.id', 'd.status', 'd.excluded', 'd.exclusion_reason',
                         'd.quantity', 'f.family_id as family_code',
-                        'f.family_name', 'f.head_name', 'f.location_id',
+                        'f.head_name', 'f.location_id',
                         'p.name as purok_name',
                         'r2.name as resource_name', 'r2.unit as resource_unit',
                         'u.name as scanned_by',
@@ -114,7 +113,7 @@ class QrTrackingController extends Controller
             'scheduleHistory' => $scheduleHistory,
             'allLocations'   => \App\Models\Location::where('status', 'active')->orderBy('name')->get(['id', 'name']),
 
-            'families' => Family::select('id', 'family_id', 'family_name', 'head_name', 'purok_id')
+            'families' => Family::select('id', 'family_id', 'head_name', 'purok_id')
                 ->with([
                     'purok:id,name',
                     'distributions' => fn ($q) => $q
@@ -124,12 +123,11 @@ class QrTrackingController extends Controller
                         ->limit(1),
                 ])
                 ->where('status', 'active')
-                ->orderBy('family_name')
+                ->orderBy('head_name')
                 ->get()
                 ->map(fn ($f) => [
                     'id'                  => $f->id,
                     'family_id'           => $f->family_id,
-                    'family_name'         => $f->family_name,
                     'head_name'           => $f->head_name,
                     'purok'               => $f->purok?->name,
                     'latest_distribution' => $f->distributions->first() ? [

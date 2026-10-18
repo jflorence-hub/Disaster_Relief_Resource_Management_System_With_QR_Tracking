@@ -10,6 +10,21 @@ class Location extends Model
 {
     use HasFactory;
 
+    protected static function booted(): void
+    {
+        static::created(function (Location $location) {
+            foreach (range(1, 7) as $number) {
+                $location->puroks()->firstOrCreate(
+                    ['name' => "Purok {$number}"],
+                    [
+                        'code' => "LOC-{$location->id}-PUROK-{$number}",
+                        'status' => 'active',
+                    ],
+                );
+            }
+        });
+    }
+
     protected $fillable = [
         'name',
         'type',

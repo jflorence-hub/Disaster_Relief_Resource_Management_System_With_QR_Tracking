@@ -4,6 +4,7 @@ import Modal from '@/components/modal';
 import { Distribution, DistributionItem, Location, ResourceItem, ResourceSet, StockWarning } from '@/types/models';
 import { Head, router, useForm } from '@inertiajs/react';
 import {
+    CalendarPlus,
     CheckCircle2,
     Clock3,
     Download,
@@ -20,11 +21,9 @@ import { QRCodeCanvas } from 'qrcode.react';
 interface Family {
     id: number;
     family_id: string;
-    family_name: string;
     head_name: string;
     phone?: string | null;
     household_member: number;
-    address?: string | null;
     purok_id: number;
     status: string;
 
@@ -129,6 +128,7 @@ export default function DistributionPage({
     const [selectedStaffId, setSelectedStaffId] = useState('');
     const [filterLocationId, setFilterLocationId] = useState(filters.location_id ?? '');
     const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'pending' | 'completed' | 'excluded'>('all');
+    const [showScheduleModal, setShowScheduleModal] = useState(false);
 
     const [scheduleValue, setScheduleValue] = useState(
         scheduledAt || currentDate,
@@ -155,6 +155,7 @@ export default function DistributionPage({
             },
             {
                 preserveScroll: true,
+                onSuccess: () => setShowScheduleModal(false),
             },
         );
     };
@@ -324,7 +325,6 @@ export default function DistributionPage({
 
             return (
                 family.family_id.toLowerCase().includes(value) ||
-                family.family_name.toLowerCase().includes(value) ||
                 family.head_name.toLowerCase().includes(value) ||
                 family.purok?.name?.toLowerCase().includes(value)
             );
@@ -713,6 +713,20 @@ export default function DistributionPage({
             <Head title="Distribution" />
 
 
+            {/* ── SCHEDULE BUTTON — admin only ── */}
+            {userRole === 'admin' && (
+                <div className="mb-4 flex justify-end">
+                    <button
+                        type="button"
+                        className="btn-primary flex items-center gap-2"
+                        onClick={() => setShowScheduleModal(true)}
+                    >
+                        <CalendarPlus size={16} />
+                        New Schedule
+                    </button>
+                </div>
+            )}
+
             {/* ── SUMMARY — visible to both roles ── */}
             <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">                <div className="card flex items-center gap-4">
                     <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
@@ -832,90 +846,77 @@ export default function DistributionPage({
               })}
             </div>
 
-            {/* SCHEDULE FORM — admin only */}
+            {/* SCHEDULE MODAL — admin only */}
             {userRole === 'admin' && (
-            <form
-                onSubmit={saveSchedule}
-                className="card mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
+            <Modal
+                open={showScheduleModal}
+                onClose={() => setShowScheduleModal(false)}
+                title="New Distribution Schedule"
             >
-                <div>
-                    <h2 className="font-semibold text-slate-800">
-                        Distribution Schedule
-                    </h2>
-                    <p className="mt-1 text-xs text-slate-500">
+                <form onSubmit={saveSchedule} className="space-y-4">
+                    <p className="text-xs text-slate-500">
                         Set the date, location, and relief for all family distribution records.
                     </p>
-                </div>
-                <div className="flex flex-wrap gap-2 sm:items-end">
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">
-                            Date and time
-                        </label>
+                        <label className="label">Date and time</label>
                         <input
                             type="datetime-local"
                             className="input-field"
                             value={scheduleValue}
-                            onChange={(e) =>
-                                setScheduleValue(e.target.value)
-                            }
+                            onChange={(e) => setScheduleValue(e.target.value)}
                             required
                         />
                     </div>
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">
-                            Location
-                        </label>
+                        <label className="label">Location</label>
                         <select
-                            className="input-field min-w-[170px]"
+                            className="input-field"
                             value={scheduleLocationId}
-                            onChange={(e) =>
-                                setScheduleLocationId(e.target.value)
-                            }
+                            onChange={(e) => setScheduleLocationId(e.target.value)}
                         >
                             <option value="">Select location</option>
                             {locations.map((location) => (
-                                <option
-                                    key={location.id}
-                                    value={String(location.id)}
-                                >
+                                <option key={location.id} value={String(location.id)}>
                                     {location.name}
                                 </option>
                             ))}
                         </select>
                     </div>
                     <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">
-                            Relief resource
-                        </label>
+                        <label className="label">Relief resource</label>
                         <select
                             className="input-field"
                             value={scheduleResourceId}
-                            onChange={(e) =>
-                                setScheduleResourceId(e.target.value)
-                            }
+                            onChange={(e) => setScheduleResourceId(e.target.value)}
                             required
                         >
                             <option value="">Select relief resource</option>
                             {resources.map((resource) => (
-                                <option
-                                    key={resource.id}
-                                    value={String(resource.id)}
-                                >
+                                <option key={resource.id} value={String(resource.id)}>
                                     {resource.name}
                                 </option>
                             ))}
                         </select>
                     </div>
-                    <button
-                        type="submit"
-                        className="btn-primary"
-                        disabled={!scheduleResourceId}
-                    >
-                        Add Schedule
-                    </button>
-                </div>
-            </form>
-            )} {/* end admin-only schedule form */}
+                    <div className="flex justify-end gap-2 pt-1">
+                        <button
+                            type="button"
+                            className="btn-secondary"
+                            onClick={() => setShowScheduleModal(false)}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            className="btn-primary"
+                            disabled={!scheduleResourceId || !scheduleValue}
+                        >
+                            Schedule Distribution
+                        </button>
+                    </div>
+                </form>
+            </Modal>
+            )} {/* end admin-only schedule modal */}
 
             {/* DISTRIBUTION TABLE — visible to both admin and staff */}
             <div className="card overflow-x-auto p-0">
@@ -999,7 +1000,7 @@ export default function DistributionPage({
 
                                         <div>
                                             <p className="font-medium text-slate-800">
-                                                {row.family.family_name}
+                                                {row.family.family_id}
                                             </p>
 
                                             <p className="text-xs text-slate-400">
@@ -1172,7 +1173,7 @@ export default function DistributionPage({
                     <form onSubmit={submit} className="p-6">
                         <p className="mt-1 text-sm text-slate-500">
                             Edit the distribution details for{' '}
-                            {editingFamily?.family_name ?? 'family'}.
+                            {editingFamily?.head_name ?? 'family'}.
                         </p>
 
                         <div className="mt-5 space-y-4">
@@ -1186,7 +1187,7 @@ export default function DistributionPage({
                                 <input
                                     type="text"
                                     className="input-field"
-                                    value={editingFamily?.family_name ?? ''}
+                                    value={editingFamily?.head_name ?? ''}
                                     disabled
                                 />
                             </div>
@@ -1706,7 +1707,7 @@ export default function DistributionPage({
                             <h2 className="text-lg font-semibold mb-2">Exclude Family</h2>
                             <p className="text-sm text-gray-600 mb-3">
                                 Optionally enter a reason for excluding{' '}
-                                <strong>{excludingDistribution.family?.family_name}</strong>.
+                                <strong>{excludingDistribution.family?.head_name}</strong>.
                             </p>
                             <label className="block text-sm font-medium mb-1">Reason (optional)</label>
                             <textarea

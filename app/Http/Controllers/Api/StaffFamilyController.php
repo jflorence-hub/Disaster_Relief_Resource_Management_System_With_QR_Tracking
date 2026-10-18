@@ -9,13 +9,12 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 
 class StaffFamilyController extends Controller {
 
  public function index(Request $request): JsonResponse {
   $staff=$request->user();
-  $families=Family::query()->with(['purok:id,name','distributions'=>function($q){$q->with(['resource:id,name,unit','additionalResource:id,name,unit','location:id,name'])->orderByDesc('distribution_date');}])->where('status','active')->where('purok_id',$staff->purok_id)->orderBy('family_name')->get(['id','family_id','family_name','head_name','phone','household_member','address','purok_id','status']);
+  $families=Family::query()->with(['purok:id,name','distributions'=>function($q){$q->with(['resource:id,name,unit','additionalResource:id,name,unit','location:id,name'])->orderByDesc('distribution_date');}])->where('status','active')->where('purok_id',$staff->purok_id)->orderBy('head_name')->get(['id','family_id','head_name','email','phone','household_member','purok_id','status']);
   $families->each(function(Family $family){$family->setAttribute('latest_distribution',$family->distributions->first());});
   return response()->json(['staff'=>['id'=>$staff->id,'name'=>$staff->name,'purok_id'=>$staff->purok_id,'purok'=>optional($staff->purok)->name],'families'=>$families]);
  }
@@ -27,11 +26,9 @@ class StaffFamilyController extends Controller {
   $staff = $request->user();
 
   $data = $request->validate([
-   'family_name'      => 'required|string|max:255',
    'head_name'        => 'required|string|max:255',
    'email'            => 'nullable|email|max:255|unique:families,email',
    'phone'            => ['nullable', 'string', 'regex:/^09[0-9]{9}$/', 'unique:families,phone'],
-   'address'          => 'required|string|max:2000',
    'household_member' => 'required|integer|min:1|max:100',
    'member_names'     => 'nullable|array',
    'member_names.*'   => 'nullable|string|max:255',
@@ -39,6 +36,28 @@ class StaffFamilyController extends Controller {
    'location_id'      => 'required|exists:locations,id',
    'pin'              => ['required', 'string', 'regex:/^[0-9]{6}$/'],
   ]);
+
+  // Security: force location_id to staff's assigned location regardless of submitted value.
+  $data['location_id'] = $staff->location_id;
+
+  if ((int) $data['purok_id'] !== (int) $staff->purok_id) {
+      return response()->json([
+          'message' => 'You can only register families in your assigned purok.',
+          'errors'  => ['purok_id' => ['Select your assigned purok.']],
+      ], 403);
+  }
+
+  // Security: validate that the submitted purok belongs to the staff's assigned location.
+  $purokBelongsToStaffLocation = \App\Models\Purok::where('id', $data['purok_id'])
+      ->where('location_id', $staff->location_id)
+      ->exists();
+
+  if (! $purokBelongsToStaffLocation) {
+      return response()->json([
+          'message' => 'The selected purok does not belong to your assigned location.',
+          'errors'  => ['purok_id' => ['Purok must be within your assigned location.']],
+      ], 403);
+  }
 
   // Duplicate member name check
   if (!empty($data['member_names'])) {
@@ -54,16 +73,10 @@ class StaffFamilyController extends Controller {
   }
 
   $family = DB::transaction(function () use ($data, $staff) {
-   do { $familyId = 'FAM-' . strtoupper(Str::random(8)); }
-   while (Family::where('family_id', $familyId)->exists());
-
    $family = Family::create([
-    'family_id'        => $familyId,
-    'family_name'      => $data['family_name'],
     'head_name'        => $data['head_name'],
     'email'            => isset($data['email']) ? strtolower(trim($data['email'])) : null,
     'phone'            => $data['phone'] ?? null,
-    'address'          => $data['address'],
     'household_member' => $data['household_member'],
     'purok_id'         => $data['purok_id'],
     'location_id'      => $data['location_id'],
@@ -96,7 +109,7 @@ class StaffFamilyController extends Controller {
      'quantity' => max(1, (int) ceil(max(1, (int) $family->household_member) / 3)),
      'location_id' => $family->location_id,
      'distribution_date' => $scheduledAt,
-     'recipient_name' => $family->family_name,
+     'recipient_name' => $family->head_name,
      'recipient_contact' => $family->phone,
      'household_member' => $family->household_member,
      'distributed_by' => $staff->id,
@@ -112,7 +125,7 @@ class StaffFamilyController extends Controller {
    'family'  => [
     'id'         => $family->id,
     'family_id'  => $family->family_id,
-    'family_name'=> $family->family_name,
+    'head_name'  => $family->head_name,
    ],
   ], 201);
  }
@@ -131,7 +144,6 @@ class StaffFamilyController extends Controller {
    'family' => [
     'id'          => $family->id,
     'family_id'   => $family->family_id,
-    'family_name' => $family->family_name,
     'head_name'   => $family->head_name,
    ],
    'members' => $members,

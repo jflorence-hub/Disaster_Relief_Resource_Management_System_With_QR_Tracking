@@ -9,6 +9,7 @@ use App\Models\Resource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
 
 class QrTrackingController extends Controller
 {
@@ -52,8 +53,8 @@ class QrTrackingController extends Controller
      *     claimed_by, deducts stock, and saves the QrScan record.
      *
      * HTTP responses for error states:
-     *  403 â€” family is excluded from this distribution
-     *  409 â€” family has already been scanned / distribution already completed
+     *  403 — family is excluded from this distribution
+     *  409 — family has already been scanned / distribution already completed
      */
     public function store(Request $request): JsonResponse
     {
@@ -88,9 +89,34 @@ class QrTrackingController extends Controller
     /**
      * Handle scan_type = 'completed' for a known family.
      * Atomically marks the distribution completed and deducts stock.
+     *
+     * Returns 403 if no active distribution schedule exists for the staff
+     * member's location within the past 24 hours.
      */
     private function handleCompletionScan(array $validated, Request $request): JsonResponse
     {
+        $staff = $request->user();
+
+        // ── Schedule firewall ────────────────────────────────────────────────
+        // Block completion scans when no distribution schedule is active for
+        // the staff member's location within the past 24 hours.
+        $activeSchedule = DB::table('distribution_schedules')
+            ->where('scheduled_at', '>=', Carbon::now()->subHours(24))
+            ->where(function ($q) use ($staff) {
+                $q->whereNull('location_id')
+                  ->orWhere('location_id', $staff?->location_id);
+            })
+            ->orderByDesc('scheduled_at')
+            ->first();
+
+        if (! $activeSchedule) {
+            return response()->json([
+                'message' => 'No active distribution schedule for your location. Contact the administrator.',
+                'no_active_schedule' => true,
+            ], 403);
+        }
+        // ── End schedule firewall ─────────────────────────────────────────────
+
         $familyId = $validated['family_id'];
 
         // QR-code-first lookup: if the request carries a QR code that matches a
@@ -126,7 +152,7 @@ class QrTrackingController extends Controller
         if ($distribution && $distribution->status === 'completed') {
             return response()->json([
                 'message'           => 'This family has already received their relief goods for this distribution schedule.',
-                'family_name'       => $distribution->family?->family_name ?? '',
+                'head_name'         => $distribution->family?->head_name ?? '',
                 'claimed_at'        => $distribution->updated_at?->format('Y-m-d H:i:s') ?? '',
                 'claimed_by'        => $distribution->claimed_by,
                 'already_completed' => true,
@@ -141,13 +167,13 @@ class QrTrackingController extends Controller
             ->first();
 
         if ($existingScan) {
-            $familyName = $distribution?->family?->family_name
-                ?? \App\Models\Family::find($familyId)?->family_name
+            $headName = $distribution?->family?->head_name
+                ?? \App\Models\Family::find($familyId)?->head_name
                 ?? '';
 
             return response()->json([
                 'message'           => 'This family has already received their relief goods for this distribution schedule.',
-                'family_name'       => $familyName,
+                'head_name'         => $headName,
                 'claimed_at'        => $existingScan->scanned_at?->format('Y-m-d H:i:s') ?? '',
                 'claimed_by'        => $existingScan->receiver,
                 'already_completed' => true,
@@ -174,7 +200,7 @@ class QrTrackingController extends Controller
         });
 
         $scan->load([
-            'family:id,family_id,family_name,head_name,purok_id',
+            'family:id,family_id,head_name,purok_id',
             'family.purok:id,name',
             'resource:id,name,unit',
             'location:id,name',
@@ -207,7 +233,7 @@ class QrTrackingController extends Controller
         $scan = $this->createScanRecord($validated, $request, $resourceId, $validated['family_id'] ?? null);
 
         $scan->load([
-            'family:id,family_id,family_name,head_name,purok_id',
+            'family:id,family_id,head_name,purok_id',
             'family.purok:id,name',
             'resource:id,name,unit',
             'location:id,name',
@@ -243,7 +269,7 @@ class QrTrackingController extends Controller
     public function index(Request $request): JsonResponse
     {
         $scans = QrScan::with([
-            'family:id,family_id,family_name,head_name,purok_id',
+            'family:id,family_id,head_name,purok_id',
             'family.purok:id,name',
             'resource:id,name,qr_code,unit',
             'location:id,name',
@@ -257,4 +283,3 @@ class QrTrackingController extends Controller
         return response()->json(['scans' => $scans]);
     }
 }
-

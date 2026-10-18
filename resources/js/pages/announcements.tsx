@@ -7,7 +7,7 @@ interface Announcement {
     id: number;
     title: string;
     body: string;
-    audience: 'family' | 'staff' | 'everyone' | 'barangay';
+    audience: 'family' | 'staff' | 'everyone';
     location_id: number | null;
     location?: { id: number; name: string } | null;
     sent_by: number | null;
@@ -18,7 +18,7 @@ interface Announcement {
 interface FormData {
     title: string;
     body: string;
-    audience: 'family' | 'staff' | 'everyone' | 'barangay';
+    audience: 'family' | 'staff' | 'everyone';
     location_id: string;
 }
 
@@ -35,7 +35,6 @@ const audienceBadge: Record<Announcement['audience'], { label: string; cls: stri
     everyone: { label: 'Everyone',  cls: 'bg-green-50 text-green-700' },
     staff:    { label: 'Staff',     cls: 'bg-blue-50 text-blue-700' },
     family:   { label: 'Families',  cls: 'bg-orange-50 text-orange-700' },
-    barangay: { label: 'Barangay',  cls: 'bg-purple-50 text-purple-700' },
 };
 
 export default function Announcements({
@@ -48,6 +47,7 @@ export default function Announcements({
     locations: { id: number; name: string }[];
 }) {
     const [activeTab, setActiveTab] = useState<AudienceTab>('all');
+    const [filterBarangay, setFilterBarangay] = useState<string>('');
 
     const form = useForm<FormData>({
         title: '',
@@ -63,9 +63,16 @@ export default function Announcements({
         });
     };
 
-    const tabAnnouncements = activeTab === 'all'
-        ? announcements
-        : announcements.filter((a) => a.audience === activeTab);
+    const tabAnnouncements = (() => {
+        if (activeTab === 'all') return announcements;
+        if (activeTab === 'barangay') {
+            const scoped = announcements.filter(a => a.location_id !== null);
+            return filterBarangay
+                ? scoped.filter(a => a.location_id === Number(filterBarangay))
+                : scoped;
+        }
+        return announcements.filter((a) => a.audience === activeTab);
+    })();
 
     const tabs: { key: AudienceTab; label: string; icon: React.ReactNode }[] = [
         { key: 'all',      label: 'All',      icon: <Megaphone size={14} /> },
@@ -95,11 +102,31 @@ export default function Announcements({
                         {t.icon}
                         {t.label}
                         <span className="ml-0.5 text-xs opacity-70">
-                            {t.key === 'all' ? announcements.length : announcements.filter(a => a.audience === t.key).length}
+                            {t.key === 'all'
+                                ? announcements.length
+                                : t.key === 'barangay'
+                                    ? announcements.filter(a => a.location_id !== null).length
+                                    : announcements.filter(a => a.audience === t.key).length}
                         </span>
                     </button>
                 ))}
             </div>
+
+            {activeTab === 'barangay' && locations.length > 0 && (
+                <div className="mb-4 flex items-center gap-2">
+                    <MapPin size={14} className="text-slate-400" />
+                    <select
+                        className="input-field w-auto text-sm"
+                        value={filterBarangay}
+                        onChange={(e) => setFilterBarangay(e.target.value)}
+                    >
+                        <option value="">All barangays</option>
+                        {locations.map((l) => (
+                            <option key={l.id} value={String(l.id)}>{l.name}</option>
+                        ))}
+                    </select>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                 {/* COMPOSE CARD */}
@@ -127,33 +154,29 @@ export default function Announcements({
                                     <option value="everyone">Everyone (staff + families)</option>
                                     <option value="staff">Staff only</option>
                                     <option value="family">Families only</option>
-                                    <option value="barangay">Specific Barangay</option>
                                 </select>
                                 {form.errors.audience && (
                                     <p className="mt-1 text-xs text-red-600">{form.errors.audience}</p>
                                 )}
                             </div>
 
-                            {/* BARANGAY DROPDOWN (shown only when audience = barangay) */}
-                            {form.data.audience === 'barangay' && (
-                                <div>
-                                    <label className="label">Barangay</label>
-                                    <select
-                                        className="input-field"
-                                        value={form.data.location_id}
-                                        onChange={(e) => form.setData('location_id', e.target.value)}
-                                        required
-                                    >
-                                        <option value="">Select barangay…</option>
-                                        {locations.map((l) => (
-                                            <option key={l.id} value={String(l.id)}>{l.name}</option>
-                                        ))}
-                                    </select>
-                                    {form.errors.location_id && (
-                                        <p className="mt-1 text-xs text-red-600">{form.errors.location_id}</p>
-                                    )}
-                                </div>
-                            )}
+                            {/* BARANGAY DROPDOWN (always visible) */}
+                            <div>
+                                <label className="label">Narrow to barangay (optional)</label>
+                                <select
+                                    className="input-field"
+                                    value={form.data.location_id}
+                                    onChange={(e) => form.setData('location_id', e.target.value)}
+                                >
+                                    <option value="">All barangays</option>
+                                    {locations.map((l) => (
+                                        <option key={l.id} value={String(l.id)}>{l.name}</option>
+                                    ))}
+                                </select>
+                                {form.errors.location_id && (
+                                    <p className="mt-1 text-xs text-red-600">{form.errors.location_id}</p>
+                                )}
+                            </div>
 
                             {/* TITLE */}
                             <div>
@@ -231,7 +254,7 @@ export default function Announcements({
                                                     <span>by {a.sender?.name ?? 'Admin'}</span>
                                                     <span>·</span>
                                                     <span>{formatDate(a.created_at)}</span>
-                                                    {a.audience === 'barangay' && a.location?.name && (
+                                                    {a.location?.name && (
                                                         <>
                                                             <span>·</span>
                                                             <span className="text-purple-600">{a.location.name}</span>

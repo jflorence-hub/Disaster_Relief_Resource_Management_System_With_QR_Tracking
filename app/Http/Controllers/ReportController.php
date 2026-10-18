@@ -83,19 +83,17 @@ class ReportController extends Controller
                     ? $query->where('purok_id', $user->purok_id)
                     : $query->whereRaw('1 = 0')
             )
-            ->orderBy('family_name')
+            ->orderBy('head_name')
             ->get();
 
         return $this->csvResponse(
             'families-report.csv',
-            ['Family ID', 'Family Name', 'Head of Family', 'Phone', 'Household Members', 'Address', 'Purok', 'Location', 'Status'],
+            ['Family ID', 'Head of Family', 'Phone', 'Household Members', 'Purok', 'Location', 'Status'],
             $families->map(fn ($family) => [
                 $family->family_id,
-                $family->family_name,
                 $family->head_name,
                 $family->phone,
                 $family->household_member,
-                $family->address,
                 $family->purok?->name,
                 $family->location?->name,
                 $family->status,

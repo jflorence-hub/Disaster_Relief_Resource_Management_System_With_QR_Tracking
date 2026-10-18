@@ -13,7 +13,6 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class FamilyImportController extends Controller
@@ -251,7 +250,7 @@ class FamilyImportController extends Controller
             );
         }
 
-        return Location::create([
+        $location = Location::create([
             'name'            => $name,
             'type'            => 'distribution_center',
             'address'         => $name,
@@ -261,6 +260,8 @@ class FamilyImportController extends Controller
             'captain_contact' => $meta['captain_contact'],
             'captain_email'   => $meta['captain_email'],
         ]);
+
+        return $location;
     }
 
     private function importRow(array $row, Location $location): void
@@ -286,8 +287,6 @@ class FamilyImportController extends Controller
         }
 
         $family = Family::create([
-            'family_id'        => 'FAM-IMPORT-' . Str::random(8),
-            'family_name'      => $headName . ' Family',
             'head_name'        => $headName,
             'phone'            => $row['phone'],
             'household_member' => max(1, $row['member_count']),
@@ -296,8 +295,6 @@ class FamilyImportController extends Controller
             'pin'              => Hash::make($this->generatePin()),
             'status'           => 'active',
         ]);
-
-        $family->update(['family_id' => 'FAM-' . str_pad((string) $family->id, 4, '0', STR_PAD_LEFT)]);
 
         foreach ($row['member_names'] as $idx => $name) {
             HouseholdMember::create([
@@ -314,7 +311,7 @@ class FamilyImportController extends Controller
             'quantity'          => max(1, (int) ceil($family->household_member / 3)),
             'location_id'       => $location->id,
             'distribution_date' => $scheduledAt,
-            'recipient_name'    => $family->family_name,
+            'recipient_name'    => $family->head_name,
             'recipient_contact' => $family->phone,
             'household_member'  => $family->household_member,
             'status'            => 'pending',

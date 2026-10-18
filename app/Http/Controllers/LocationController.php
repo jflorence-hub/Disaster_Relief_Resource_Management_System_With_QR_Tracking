@@ -65,13 +65,12 @@ class LocationController extends Controller
     public function store(Request $request): RedirectResponse
     {
         abort_unless($request->user()->role === 'admin', 403, 'Only administrators can create locations.');
-        Location::create(
-            $this->validated($request)
-        );
+
+        Location::create($this->validated($request));
 
         return back()->with(
             'success',
-            'Location created successfully.'
+            'Location created successfully. 7 puroks (Purok 1–7) were created automatically.'
         );
     }
 

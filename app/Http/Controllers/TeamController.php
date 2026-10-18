@@ -40,7 +40,7 @@ class TeamController extends Controller
             ->where('role', 'staff')
             ->with(['purok:id,name', 'location:id,name'])
             ->orderBy('created_at')
-            ->get(['id', 'name', 'email', 'phone', 'purok_id', 'location_id', 'created_at']);
+            ->get(['id', 'name', 'email', 'phone', 'purok_id', 'preferred_purok_ids', 'location_id', 'created_at']);
 
         return Inertia::render('team-management', [
             'members'      => $members,
@@ -195,30 +195,36 @@ class TeamController extends Controller
         return back()->with('success', 'Team member removed successfully.');
     }
 
-    public function approve(User $user): RedirectResponse
+    public function approve(Request $request, User $user): RedirectResponse
     {
         if ($user->status !== 'pending') {
             return back()->with('error', 'This user is not pending approval.');
         }
 
-        $this->approvalService->approve($user);
+        $data = $request->validate([
+            'purok_id' => 'nullable|exists:puroks,id',
+        ]);
 
-        // Assign purok after approval
-        if ($user->purok_id) {
-            Purok::where('id', $user->purok_id)
-                ->update(['assigned_staff_id' => $user->id]);
-        }
+        $purokId = isset($data['purok_id']) ? (int) $data['purok_id'] : null;
+
+        $this->approvalService->approve($user, $purokId);
 
         return back()->with('success', 'Staff member approved and notified.');
     }
 
-    public function reject(User $user): RedirectResponse
+    public function reject(Request $request, User $user): RedirectResponse
     {
         if ($user->status !== 'pending') {
             return back()->with('error', 'This user is not pending approval.');
         }
 
-        $this->approvalService->reject($user);
+        $data = $request->validate([
+            'rejection_reason' => 'nullable|string|max:1000',
+        ]);
+
+        $reason = trim((string) ($data['rejection_reason'] ?? ''));
+
+        $this->approvalService->reject($user, $reason);
 
         return back()->with('success', 'Registration request rejected.');
     }

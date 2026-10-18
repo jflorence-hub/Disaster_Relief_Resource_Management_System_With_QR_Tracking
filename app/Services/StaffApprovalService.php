@@ -10,15 +10,26 @@ class StaffApprovalService
 {
     /**
      * Approve a pending staff registration.
-     * Activates the account and notifies the staff member.
+     * Activates the account, assigns the purok, and notifies the staff member.
+     *
+     * @param  int|null  $purokId  The purok to assign. Null keeps the user's current purok_id (for admin-panel-assigned puroks).
      */
-    public function approve(User $user): void
+    public function approve(User $user, ?int $purokId = null): void
     {
         if ($user->status !== 'pending') {
             throw new \InvalidArgumentException('User is not pending approval.');
         }
 
-        // Load the purok and location the staff selected during registration
+        // Assign the purok selected by the admin at approval time
+        if ($purokId !== null) {
+            $user->purok_id = $purokId;
+
+            // Mark the purok as occupied
+            \App\Models\Purok::where('id', $purokId)
+                ->update(['assigned_staff_id' => $user->id]);
+        }
+
+        // Load the purok and location for the email
         $user->loadMissing(['purok:id,name', 'location:id,name']);
         $purokName    = $user->purok?->name    ?? 'your assigned purok';
         $locationName = $user->location?->name ?? 'your assigned location';
@@ -50,29 +61,46 @@ class StaffApprovalService
 
     /**
      * Reject a pending staff registration.
-     * Sends email before deleting the user.
+     * Sends the rejection email before deleting the user.
+     *
+     * The optional $reason (max 1000 chars, trimmed by the controller) is
+     * injected into the email body when non-empty and recorded as a single
+     * audit log line. No database column persists the reason.
      */
-    public function reject(User $user): void
+    public function reject(User $user, string $reason = ''): void
     {
         if ($user->status !== 'pending') {
             throw new \InvalidArgumentException('User is not pending approval.');
         }
 
-        $email = $user->email;
-        $name = $user->name;
+        $email  = $user->email;
+        $name   = $user->name;
+        $reason = trim($reason); // defense-in-depth; controller already trims
+
+        // Build body: keep the generic sentence in all cases; insert the
+        // reason line only when a non-empty reason was provided.
+        $body = "Dear {$name},\n\n"
+            . "We regret to inform you that your registration request was not approved.";
+
+        if ($reason !== '') {
+            $body .= "\n\nReason provided: {$reason}";
+        }
+
+        $body .= "\n\nPlease contact the administrator for more information.";
 
         try {
-            Mail::raw(
-                "Dear {$name},\n\n"
-                . "We regret to inform you that your registration request was not approved. "
-                . "Please contact the administrator for more information.",
-                function ($message) use ($email) {
-                    $message->to($email)
-                        ->subject('Staff Registration Update - Disaster Relief System');
-                }
-            );
+            Mail::raw($body, function ($message) use ($email) {
+                $message->to($email)
+                    ->subject('Staff Registration Update - Disaster Relief System');
+            });
         } catch (\Exception $e) {
             Log::error("Failed to send rejection email to {$email}: {$e->getMessage()}");
+        }
+
+        // Optional audit line — the only persisted record of the reason
+        // (lives in Laravel logs, never in the database).
+        if ($reason !== '') {
+            Log::info("Staff registration rejected for {$email}. Reason: {$reason}");
         }
 
         $user->delete();

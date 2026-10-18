@@ -14,12 +14,10 @@ class Family extends Authenticatable
 
     protected $fillable = [
         'family_id',
-        'family_name',
         'head_name',
         'phone',
         'email',
         'household_member',
-        'address',
         'purok_id',
         'location_id',
         'pin',
@@ -33,12 +31,13 @@ class Family extends Authenticatable
         'api_token',
     ];
 
-    /**
-     * Auto-generate a unique QR code when a family is created.
-     */
     protected static function booted(): void
     {
         static::creating(function (Family $family) {
+            do {
+                $family->family_id = 'TEMP-FAMILY-' . Str::uuid();
+            } while (static::where('family_id', $family->family_id)->exists());
+
             if (empty($family->qr_code)) {
                 do {
                     $candidate = 'FAM-QR-' . strtoupper(Str::random(10));
@@ -47,6 +46,25 @@ class Family extends Authenticatable
                 $family->qr_code = $candidate;
             }
         });
+
+        static::created(function (Family $family) {
+            $family->forceFill([
+                'family_id' => static::generateUniqueFamilyId(),
+            ])->saveQuietly();
+        });
+    }
+
+    public static function generateUniqueFamilyId(): string
+    {
+        do {
+            $letters = '';
+            for ($i = 0; $i < 3; $i++) {
+                $letters .= chr(random_int(65, 90));
+            }
+            $candidate = $letters . '-' . str_pad((string) random_int(0, 99999), 5, '0', STR_PAD_LEFT);
+        } while (static::where('family_id', $candidate)->exists());
+
+        return $candidate;
     }
 
     public function purok(): BelongsTo

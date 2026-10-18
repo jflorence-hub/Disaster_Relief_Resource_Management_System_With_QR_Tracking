@@ -75,7 +75,7 @@ class DistributionController extends Controller
                     'additional_quantity' => null,
                     'location_id' => $family->location_id,
                     'distribution_date' => $scheduledAt,
-                    'recipient_name' => $family->family_name,
+                    'recipient_name' => $family->head_name,
                     'recipient_contact' => $family->phone,
                     'household_member' => $family->household_member,
                     'distributed_by' => $user->id,
@@ -90,7 +90,7 @@ class DistributionController extends Controller
          */
         $distributions = Distribution::query()
             ->with([
-                'family:id,family_id,family_name,head_name,phone,household_member,purok_id',
+                'family:id,family_id,head_name,phone,household_member,purok_id',
                 'resource:id,name,unit,category',
                 'additionalResource:id,name,unit,category',
                 'location:id,name',
@@ -115,7 +115,6 @@ class DistributionController extends Controller
                         ->orWhereHas('family', function ($familyQuery) use ($search) {
                             $familyQuery
                                 ->where('family_id', 'like', "%{$search}%")
-                                ->orWhere('family_name', 'like', "%{$search}%")
                                 ->orWhere('head_name', 'like', "%{$search}%");
                         });
                 });
@@ -158,15 +157,13 @@ class DistributionController extends Controller
                     $user->purok_id
                 )
             )
-            ->orderBy('family_name')
+            ->orderBy('head_name')
             ->get([
                 'id',
                 'family_id',
-                'family_name',
                 'head_name',
                 'phone',
                 'household_member',
-                'address',
                 'purok_id',
                 'location_id',
                 'status',
@@ -266,7 +263,7 @@ class DistributionController extends Controller
 
         $this->checkStaffAccess($request, $family);
 
-        $data['recipient_name'] = $family->family_name;
+        $data['recipient_name'] = $family->head_name;
         $data['recipient_contact'] = $family->phone;
         $data['household_member'] = $family->household_member;
         $data['distributed_by'] = $request->user()->id;
@@ -394,7 +391,7 @@ class DistributionController extends Controller
             }
 
             $dist->family_id = $family->id;
-            $dist->recipient_name = $family->family_name;
+            $dist->recipient_name = $family->head_name;
             $dist->recipient_contact = $family->phone;
             $dist->household_member = $family->household_member;
             $dist->resource_id = $data['resource_id'] ?? null;
@@ -549,7 +546,7 @@ class DistributionController extends Controller
                         'additional_quantity'    => null,
                         'location_id'     => $family->location_id,
                         'distribution_date' => $scheduledAt,
-                        'recipient_name'  => $family->family_name,
+                        'recipient_name'  => $family->head_name,
                         'recipient_contact' => $family->phone,
                         'household_member' => $family->household_member,
                         'distributed_by'  => $request->user()->id,
@@ -813,7 +810,7 @@ class DistributionController extends Controller
 
         $history = Distribution::query()
             ->with([
-                'family:id,family_id,family_name,head_name,household_member,purok_id',
+                'family:id,family_id,head_name,household_member,purok_id',
                 'resource:id,name,unit',
                 'additionalResource:id,name,unit',
                 'location:id,name',

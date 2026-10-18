@@ -93,12 +93,14 @@ export default function Resources({
     filters,
     userRole,
     disasterTypes,
+    expiryAlerts = [],
 }: {
     resources: ResourceItem[];
     resourceSets?: ResourceSet[];
     userRole: string;
     locations: Location[];
     disasterTypes?: string[];
+    expiryAlerts?: { id: number; name: string; days: number }[];
     filters: {
         search?: string;
         category?: string;
@@ -147,6 +149,7 @@ export default function Resources({
         description: '',
         location_id: '',
         disaster: '',
+        num_sets: 1,
     });
     const [setFormItems, setSetFormItems] = useState<{ resource_id: string; quantity: number }[]>([]);
     const [setFormErrors, setSetFormErrors] = useState<Record<string, string>>({});
@@ -158,27 +161,25 @@ export default function Resources({
      * NEW RESOURCE
      *
      * Every newly-created resource belongs to Main Warehouse.
-     * Users cannot choose another location when adding stock.
+    /*
+     * CREATE RESOURCE — prefill location from the active filter, or Main Warehouse as fallback.
      */
     const openCreate = () => {
         setEditing(null);
 
         form.setData({
             ...emptyForm,
-            location_id: mainWarehouse
-                ? String(mainWarehouse.id)
-                : '',
+            location_id: selectedLocation
+                ? selectedLocation
+                : (mainWarehouse ? String(mainWarehouse.id) : ''),
         });
 
         setShowForm(true);
     };
 
     /*
-     * EDIT RESOURCE
-     *
-     * Existing resource keeps its current location.
-     * Location should NOT be changed from this page.
-     * Inventory movement belongs in QR Tracking.
+     * EDIT RESOURCE — location can now be changed from this form.
+     * Use QR Tracking to record physical stock movements.
      */
     const openEdit = (resource: ResourceItem) => {
         setEditing(resource);
@@ -202,13 +203,6 @@ export default function Resources({
 
     const submit: FormEventHandler = (e) => {
         e.preventDefault();
-
-        if (!mainWarehouse && !editing) {
-            alert(
-                'Main Warehouse was not found. Please create a location named "Main Warehouse" first.',
-            );
-            return;
-        }
 
         if (editing) {
             form.put(`/resources/${editing.id}`, {
@@ -322,7 +316,7 @@ export default function Resources({
     /** Open create set form */
     const openCreateSet = () => {
         setEditingSet(null);
-        setSetFormData({ name: '', description: '', location_id: '', disaster: '' });
+        setSetFormData({ name: '', description: '', location_id: '', disaster: '', num_sets: 1 });
         setSetFormItems([]);
         setSetFormErrors({});
         setShowSetForm(true);
@@ -336,6 +330,7 @@ export default function Resources({
             description: set.description ?? '',
             location_id: set.location_id ? String(set.location_id) : '',
             disaster: set.disaster ?? '',
+            num_sets: (set as ResourceSet & { num_sets?: number }).num_sets ?? 1,
         });
         setSetFormItems(
             (set.items ?? []).map((item: ResourceSetItem) => ({
@@ -380,6 +375,7 @@ export default function Resources({
             description: setFormData.description || null,
             location_id: setFormData.location_id ? Number(setFormData.location_id) : null,
             disaster: setFormData.disaster || null,
+            num_sets: Number(setFormData.num_sets) || 1,
             items: setFormItems.map((i) => ({
                 resource_id: Number(i.resource_id),
                 quantity: Number(i.quantity),
@@ -450,6 +446,23 @@ export default function Resources({
             {/* ── RESOURCES TAB ──────────────────────────────────────────────── */}
             {activeTab === 'resources' && (
                 <>
+                    {/* EXPIRY WARNING BANNER */}
+                    {expiryAlerts.length > 0 && (
+                        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                            <div className="flex items-start gap-2">
+                                <span className="mt-0.5 text-amber-500">⚠</span>
+                                <div className="text-sm text-amber-800">
+                                    <span className="font-semibold">{expiryAlerts.length} resource{expiryAlerts.length !== 1 ? 's' : ''} expiring soon — </span>
+                                    {expiryAlerts.map((a, i) => (
+                                        <span key={a.id}>
+                                            {a.name} ({a.days === 0 ? 'today' : `${a.days} day${a.days !== 1 ? 's' : ''}`}){i < expiryAlerts.length - 1 ? ', ' : ''}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* TOP CONTROLS */}
                     <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         {/* SEARCH */}
@@ -631,6 +644,14 @@ export default function Resources({
                                             {r.status === 'low_stock' && r.families_at_location != null && r.families_at_location > 0 && (
                                                 <p className="mt-0.5 text-xs text-amber-600">
                                                     ~{r.quantity} {r.unit} / {r.families_at_location} families
+                                                </p>
+                                            )}
+                                            {r.is_expired && (
+                                                <p className="mt-0.5 text-xs font-medium text-red-600">Expired</p>
+                                            )}
+                                            {!r.is_expired && r.expiring_soon && r.days_until_expiry != null && (
+                                                <p className="mt-0.5 text-xs text-amber-600">
+                                                    Expires in {r.days_until_expiry} day{r.days_until_expiry !== 1 ? 's' : ''}
                                                 </p>
                                             )}
                                         </td>
@@ -843,18 +864,21 @@ export default function Resources({
                                         Location
                                     </label>
 
-                                    <div className="input-field flex items-center bg-slate-50">
-                                        {editing
-                                            ? editing.location?.name ??
-                                              'Unknown Location'
-                                            : mainWarehouse?.name ??
-                                              'Main Warehouse'}
-                                    </div>
+                                    <select
+                                        className="input-field"
+                                        value={form.data.location_id}
+                                        onChange={(e) => form.setData('location_id', e.target.value)}
+                                    >
+                                        <option value="">Select location (defaults to Main Warehouse)</option>
+                                        {locations.map((l) => (
+                                            <option key={l.id} value={String(l.id)}>{l.name}</option>
+                                        ))}
+                                    </select>
 
                                     <p className="mt-1 text-xs text-slate-400">
                                         {editing
-                                            ? 'Inventory location can only be changed through QR Tracking.'
-                                            : 'New resources are always added to the Main Warehouse.'}
+                                            ? 'Changing location here is a manual correction. Use QR Tracking to record physical stock movements.'
+                                            : 'Leave blank to default to Main Warehouse.'}
                                     </p>
                                 </div>
 
@@ -1046,6 +1070,12 @@ export default function Resources({
                                     </div>
                                     <p className="mt-0.5 text-sm text-slate-500">
                                         {set.items?.length ?? 0} item{(set.items?.length ?? 0) !== 1 ? 's' : ''} · {set.location?.name ?? '—'}
+                                        {set.num_sets != null && (
+                                            <span className="ml-2 text-xs text-slate-400">
+                                                {set.num_sets} set{set.num_sets !== 1 ? 's' : ''} produced
+                                                {set.sets_remaining != null ? ` / ${set.sets_remaining} remaining` : ''}
+                                            </span>
+                                        )}
                                     </p>
                                     {set.description && (
                                         <p className="mt-1 text-sm text-slate-500">{set.description}</p>
@@ -1174,6 +1204,25 @@ export default function Resources({
                                     <option key={d} value={d}>{d}</option>
                                 ))}
                             </select>
+                        </div>
+
+                        {/* NUMBER OF SETS */}
+                        <div>
+                            <label className="label">Number of sets to produce</label>
+                            <input
+                                type="number"
+                                className="input-field"
+                                min={1}
+                                max={10000}
+                                value={setFormData.num_sets}
+                                onChange={(e) => setSetFormData((p) => ({ ...p, num_sets: Number(e.target.value) || 1 }))}
+                            />
+                            <p className="mt-1 text-xs text-slate-400">
+                                Stock will be deducted: quantity per set × number of sets for each resource.
+                            </p>
+                            {setFormErrors.stock && (
+                                <p className="mt-1 text-xs text-red-600">{setFormErrors.stock}</p>
+                            )}
                         </div>
                     </div>
 

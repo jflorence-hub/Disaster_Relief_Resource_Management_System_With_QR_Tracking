@@ -55,11 +55,9 @@ class FamilyDistributionController extends Controller
             'family' => [
                 'id'               => $family->id,
                 'family_id'        => $family->family_id,
-                'family_name'      => $family->family_name,
                 'head_name'        => $family->head_name,
                 'household_member' => $family->household_member,
                 'purok'            => $family->purok ? $family->purok->name : null,
-                'address'          => $family->address,
                 'location'         => $family->location
                     ? ['id' => $family->location->id, 'name' => $family->location->name]
                     : null,

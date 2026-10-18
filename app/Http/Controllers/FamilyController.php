@@ -44,11 +44,6 @@ class FamilyController extends Controller
                             "%{$search}%"
                         )
                             ->orWhere(
-                                'family_name',
-                                'like',
-                                "%{$search}%"
-                            )
-                            ->orWhere(
                                 'head_name',
                                 'like',
                                 "%{$search}%"
@@ -57,11 +52,27 @@ class FamilyController extends Controller
                                 'phone',
                                 'like',
                                 "%{$search}%"
+                            )
+                            ->orWhere(
+                                'email',
+                                'like',
+                                "%{$search}%"
                             );
                     });
                 }
             )
-            ->orderBy('family_name')
+            ->orderBy('head_name')
+            ->select([
+                'id',
+                'family_id',
+                'head_name',
+                'email',
+                'phone',
+                'household_member',
+                'purok_id',
+                'location_id',
+                'status',
+            ])
             ->get();
 
         $puroks = Purok::query()
@@ -71,6 +82,7 @@ class FamilyController extends Controller
                 'id',
                 'name',
                 'code',
+                'location_id',
             ]);
 
         /*
@@ -112,16 +124,11 @@ class FamilyController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $user = $request->user();
+        if ($request->filled('email')) {
+            $request->merge(['email' => strtolower(trim($request->input('email')))]);
+        }
 
         $data = $request->validate([
-            // family_id is generated server-side from the database primary key.
-
-            'family_name' => [
-                'required',
-                'string',
-                'max:255',
-            ],
-
             'head_name' => [
                 'required',
                 'string',
@@ -132,6 +139,13 @@ class FamilyController extends Controller
                 'nullable',
                 'string',
                 'max:50',
+            ],
+
+            'email' => [
+                'nullable',
+                'email',
+                'max:255',
+                'unique:families,email',
             ],
 
             'household_member' => [
@@ -218,8 +232,16 @@ class FamilyController extends Controller
             ]);
         }
 
+        if (!Purok::query()->whereKey($data['purok_id'])
+            ->where('location_id', $location->id)
+            ->where('status', 'active')
+            ->exists()) {
+            return back()->withErrors([
+                'purok_id' => 'The selected Purok must belong to the selected location.',
+            ]);
+        }
+
         DB::transaction(function () use ($data, $user) {
-            $data['family_id'] = 'FAM-PENDING-' . bin2hex(random_bytes(8));
             /*
              * Hash PIN.
              */
@@ -233,7 +255,6 @@ class FamilyController extends Controller
              * saved with the family.
              */
             $family = Family::create($data);
-            $family->update(['family_id' => 'FAM-' . str_pad((string) $family->id, 4, '0', STR_PAD_LEFT)]);
 
             /*
              * Create beneficiaries.
@@ -251,7 +272,7 @@ class FamilyController extends Controller
                     'additional_quantity' => null,
                     'location_id' => $family->location_id,
                     'distribution_date' => $scheduledAt,
-                    'recipient_name' => $family->family_name,
+                    'recipient_name' => $family->head_name,
                     'recipient_contact' => $family->phone,
                     'household_member' => $family->household_member,
                     'distributed_by' => $user->id,
@@ -321,6 +342,9 @@ class FamilyController extends Controller
     ): RedirectResponse {
         abort_unless($request->user()->role === 'admin', 403, 'Only administrators can edit families.');
         $user = $request->user();
+        if ($request->filled('email')) {
+            $request->merge(['email' => strtolower(trim($request->input('email')))]);
+        }
 
         if (
             $user->role === 'staff' &&
@@ -331,20 +355,6 @@ class FamilyController extends Controller
         }
 
         $data = $request->validate([
-            'family_id' => [
-                'required',
-                'string',
-                'max:50',
-                'unique:families,family_id,' .
-                $family->id,
-            ],
-
-            'family_name' => [
-                'required',
-                'string',
-                'max:255',
-            ],
-
             'head_name' => [
                 'required',
                 'string',
@@ -355,6 +365,13 @@ class FamilyController extends Controller
                 'nullable',
                 'string',
                 'max:50',
+            ],
+
+            'email' => [
+                'nullable',
+                'email',
+                'max:255',
+                'unique:families,email,' . $family->id,
             ],
 
             'household_member' => [
@@ -419,6 +436,15 @@ class FamilyController extends Controller
             ]);
         }
 
+        if (!Purok::query()->whereKey($data['purok_id'])
+            ->where('location_id', $location->id)
+            ->where('status', 'active')
+            ->exists()) {
+            return back()->withErrors([
+                'purok_id' => 'The selected Purok must belong to the selected location.',
+            ]);
+        }
+
         /*
          * Update PIN only if a new PIN
          * was entered.
@@ -453,7 +479,7 @@ class FamilyController extends Controller
                             $family->location_id,
 
                         'recipient_name' =>
-                            $family->family_name,
+                            $family->head_name,
 
                         'recipient_contact' =>
                             $family->phone,

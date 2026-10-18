@@ -124,9 +124,37 @@ class ResourceController extends Controller
         $resources = $resources->map(function ($r) use ($familyCount) {
             $r->families_coverable = $familyCount > 0 ? (int) floor($r->quantity / 1) : null;
             $r->families_at_location = $familyCount;
+
+            // Expiry flags
+            $today = now()->startOfDay();
+            if ($r->expiry_date) {
+                $expiry = \Illuminate\Support\Carbon::parse($r->expiry_date)->startOfDay();
+                $r->is_expired     = $expiry->lt($today);
+                $r->expiring_soon  = ! $r->is_expired && $expiry->diffInDays($today) <= 30;
+                $r->days_until_expiry = $r->is_expired ? 0 : (int) $today->diffInDays($expiry);
+            } else {
+                $r->is_expired    = false;
+                $r->expiring_soon = false;
+                $r->days_until_expiry = null;
+            }
+
             return $r;
         });
         }
+
+        // Top-level expiry alerts: all resources (across all locations) expiring within 30 days
+        $expiryAlerts = Resource::query()
+            ->whereNotNull('expiry_date')
+            ->whereDate('expiry_date', '>=', now()->toDateString())
+            ->whereDate('expiry_date', '<=', now()->addDays(30)->toDateString())
+            ->orderBy('expiry_date')
+            ->get(['id', 'name', 'expiry_date'])
+            ->map(function ($r) {
+                $days = (int) now()->startOfDay()->diffInDays(
+                    \Illuminate\Support\Carbon::parse($r->expiry_date)->startOfDay()
+                );
+                return ['id' => $r->id, 'name' => $r->name, 'days' => $days];
+            });
 
         $resourceSets = ResourceSet::query()
             ->with([
@@ -140,6 +168,7 @@ class ResourceController extends Controller
             'resources'    => $resources,
             'userRole'     => $user->role,
             'resourceSets' => $resourceSets,
+            'expiryAlerts' => $expiryAlerts ?? collect(),
 
             'locations' => Location::select('id', 'name')
                 ->when(!$isAdmin && $user->location_id, fn ($q) => $q->whereKey($user->location_id))
@@ -167,25 +196,26 @@ class ResourceController extends Controller
     {
         abort_unless($request->user()->role === 'admin', 403, 'Only administrators can add resources.');
 
-        $mainWarehouse = Location::whereRaw('LOWER(name) = ?', ['main warehouse'])->first();
-
-        if (!$mainWarehouse) {
-            return back()->withErrors([
-                'location_id' => 'Main Warehouse location does not exist.',
-            ]);
-        }
-
         $data = $this->validated($request);
 
-        /*
-         * New resources ALWAYS go to Main Warehouse,
-         * regardless of what the frontend sends.
-         */
-        $data['location_id'] = $mainWarehouse->id;
+        // Use the submitted location_id if provided; fall back to Main Warehouse only when absent.
+        if (empty($data['location_id'])) {
+            $mainWarehouse = Location::whereRaw('LOWER(name) = ?', ['main warehouse'])->first();
 
-        Resource::create($data);
+            if (!$mainWarehouse) {
+                return back()->withErrors([
+                    'location_id' => 'No location selected and Main Warehouse does not exist.',
+                ]);
+            }
 
-        return back()->with('success', 'Resource created successfully in Main Warehouse.');
+            $data['location_id'] = $mainWarehouse->id;
+        }
+
+        $resource = Resource::create($data);
+
+        $locationName = $resource->location?->name ?? 'selected location';
+
+        return back()->with('success', "Resource created successfully in {$locationName}.");
     }
 
     public function update(Request $request, Resource $resource): RedirectResponse
@@ -194,11 +224,12 @@ class ResourceController extends Controller
 
         $data = $this->validated($request, $resource);
 
-        /*
-         * Location changes must happen through QR Tracking,
-         * not through this form.
-         */
-        unset($data['location_id']);
+        // location_id can now be changed via the edit form.
+        // Use QR Tracking to record physical stock movements;
+        // this form is for manual corrections.
+        if (empty($data['location_id'])) {
+            unset($data['location_id']);
+        }
 
         $resource->update($data);
 

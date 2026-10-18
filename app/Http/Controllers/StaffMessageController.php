@@ -27,9 +27,9 @@ class StaffMessageController extends Controller
             StaffMessage::where('recipient_id', $user->id)->whereNull('read_at')->update(['read_at' => now()]);
         }
         $familyMessages = $user->role === 'admin'
-            ? DB::table('family_messages')->join('families', 'families.id', '=', 'family_messages.family_id')->select('family_messages.*', 'families.family_id as public_family_id', 'families.family_name', 'families.head_name')->orderBy('family_messages.created_at')->get()
+            ? DB::table('family_messages')->join('families', 'families.id', '=', 'family_messages.family_id')->select('family_messages.*', 'families.family_id as public_family_id', 'families.head_name')->orderBy('family_messages.created_at')->get()
             : collect();
-        $families = $user->role === 'admin' ? \App\Models\Family::orderBy('family_name')->get(['id', 'family_id', 'family_name']) : collect();
+        $families = $user->role === 'admin' ? \App\Models\Family::orderBy('head_name')->get(['id', 'family_id', 'head_name']) : collect();
         return Inertia::render('messages', ['messages' => $messages, 'staff' => $staff, 'admin' => $admin ? ['id' => $admin->id, 'name' => $admin->name] : null, 'userRole' => $user->role, 'familyMessages' => $familyMessages, 'families' => $families]);
     }
 

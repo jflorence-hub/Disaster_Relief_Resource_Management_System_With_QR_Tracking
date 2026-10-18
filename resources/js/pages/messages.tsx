@@ -17,13 +17,12 @@ type FamilyMessage = {
     id: number;
     family_id: number;
     public_family_id: string;
-    family_name: string;
     head_name: string;
     sender_type: string;
     message: string;
     created_at: string;
 };
-type FamilyOption = { id: number; family_id: string; family_name: string };
+type FamilyOption = { id: number; family_id: string; head_name: string };
 
 // ──────────────────────────────────────────────
 // HELPERS
@@ -292,7 +291,7 @@ export default function Messages({
                                             </div>
                                             <div className="min-w-0">
                                                 <p className={`truncate text-sm font-medium ${isActive ? 'text-blue-700' : 'text-slate-800'}`}>
-                                                    {f.family_name}
+                                                    {f.head_name}
                                                 </p>
                                                 <p className="truncate text-xs text-slate-400">
                                                     {lastMsg ? lastMsg.message.slice(0, 28) + (lastMsg.message.length > 28 ? '…' : '') : f.family_id}
@@ -412,7 +411,7 @@ export default function Messages({
                                     <House size={16} />
                                 </div>
                                 <div>
-                                    <p className="text-sm font-semibold text-slate-800">{selectedFamily.family_name}</p>
+                                    <p className="text-sm font-semibold text-slate-800">{selectedFamily.head_name}</p>
                                     <p className="text-xs text-slate-400">{selectedFamily.family_id} · Family App conversation</p>
                                 </div>
                             </div>
@@ -434,7 +433,7 @@ export default function Messages({
                                                         text={m.message}
                                                         time={formatTime(m.created_at)}
                                                         isSelf={m.sender_type === 'admin'}
-                                                        name={m.sender_type !== 'admin' ? m.family_name : undefined}
+                                                        name={m.sender_type !== 'admin' ? m.head_name : undefined}
                                                     />
                                                 ))}
                                             </div>
@@ -447,7 +446,7 @@ export default function Messages({
                             <form onSubmit={submitFamily} className="flex items-end gap-2 border-t border-slate-100 bg-white px-4 py-3">
                                 <textarea
                                     className="input-field min-h-[2.5rem] flex-1 resize-none py-2 text-sm"
-                                    placeholder={`Reply to ${selectedFamily.family_name}…`}
+                                    placeholder={`Reply to ${selectedFamily.head_name}…`}
                                     rows={1}
                                     value={form.data.message}
                                     onChange={(e) => form.setData('message', e.target.value)}

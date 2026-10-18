@@ -6,17 +6,18 @@ The Flutter apps call the Laravel API in this project and therefore read/write t
 
 1. Configure `.env` locally from `.env.example`; do not commit or share real credentials.
 2. Ensure the database connection points to the same database used by the website.
-3. Run `php artisan migrate` after backing up the database. The added migrations create family email/PIN-reset fields and family-to-admin messages.
+3. Back up the database, then run `php artisan migrate`. The added migrations include family email/PIN recovery, random Family IDs in `ABC-12345` format, location-scoped Puroks, and removal of the redundant family-name/address columns.
 4. Configure Laravel SMTP mail settings before using Family PIN recovery. Gmail users should use a Google App Password, not their normal account password.
 5. Run the Laravel server: `php artisan serve --host=0.0.0.0 --port=8000` for local device testing.
 6. Run either Flutter app with `--dart-define=API_BASE_URL=http://10.0.2.2:8000/api` on an Android emulator, or use the computer's LAN IP for a physical phone.
+7. Build release APKs with the current server URL: `.\build-apks.ps1 -ApiUrl https://your-current-domain/api`. Free ngrok hostnames expire; rebuild with the new URL after restarting the tunnel.
 
 ## Added/used API endpoints
 
 - `POST /api/login` — staff login, returns bearer token.
 - `GET /api/me`, `POST /api/logout` — authenticated staff session.
 - `GET /api/puroks`, `GET /api/locations` — registration dropdowns / location list.
-- `POST /api/family/register`, `POST /api/family/login` — family registration and phone/Family ID + PIN login.
+- `POST /api/family/register`, `POST /api/family/login` — family registration and email or phone + PIN login.
 - `POST /api/family/forgot-password`, `POST /api/family/reset-password` — email PIN reset code flow.
 - `GET /api/family/me`, `GET /api/family/distributions` — authenticated family profile and history/schedule.
 - `GET /api/family/messages`, `POST /api/family/messages` — family concerns and admin replies. Admins can view/reply on the website Messages page.

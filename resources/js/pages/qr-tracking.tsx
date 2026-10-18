@@ -19,7 +19,6 @@ interface ScheduleFamily {
     exclusion_reason: string | null;
     quantity: number;
     family_code: string;
-    family_name: string;
     head_name: string;
     location_id: number | null;
     purok_name: string | null;
@@ -173,7 +172,6 @@ export default function QrTracking({
         return scheduleHistory.flatMap(s =>
             s.families
                 .filter(f =>
-                    f.family_name.toLowerCase().includes(q) ||
                     f.head_name.toLowerCase().includes(q) ||
                     (s.location_name ?? '').toLowerCase().includes(q) ||
                     (f.purok_name ?? '').toLowerCase().includes(q)
@@ -513,7 +511,7 @@ export default function QrTracking({
                                 <label className="label">Family</label>
                                 <select className="input-field" value={form.data.family_id} onChange={e => selectFamily(e.target.value)}>
                                     <option value="">Choose a family…</option>
-                                    {families.map(f => <option key={f.id} value={f.id}>{f.family_name} — {f.family_id}</option>)}
+                                    {families.map(f => <option key={f.id} value={f.id}>{f.head_name} — {f.family_id}</option>)}
                                 </select>
                             </div>
                             <div>
