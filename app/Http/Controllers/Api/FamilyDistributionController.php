@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Distribution;
+use App\Models\HouseholdMember;
 use App\Models\QrScan;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class FamilyDistributionController extends Controller
 {
@@ -17,6 +19,7 @@ class FamilyDistributionController extends Controller
 
         $distributions = Distribution::with([
             'resource:id,name,unit',
+            'resourceSet:id,name',
             'additionalResource:id,name,unit',
             'location:id,name',
             'distributor:id,name',
@@ -25,22 +28,27 @@ class FamilyDistributionController extends Controller
             ->orderByDesc('distribution_date')
             ->get();
 
-        // Enrich each distribution with the receiver from the linked QR scan
+        // Keep scan details tied to this distribution, not another schedule for the same family.
         $distributions->each(function (Distribution $d) {
-            if ($d->qr_code) {
-                $scan = \App\Models\QrScan::where(function ($q) use ($d) {
-                    $q->where('family_id', $d->family_id)
-                      ->whereNotNull('receiver');
-                })
-                ->orderByDesc('scanned_at')
-                ->first(['receiver', 'scanned_at']);
+            $windowError = $d->claimWindowError();
+            $d->setAttribute(
+                'claim_window_open',
+                $d->status === 'pending' && ! $d->excluded && $windowError === null
+            );
+            $d->setAttribute('claim_window_message', $windowError);
 
-                if ($scan && $scan->receiver) {
-                    $d->claimed_by = $scan->receiver;
-                }
+            $scan = QrScan::with('scanner:id,name')
+                ->where('distribution_id', $d->id)
+                ->where('scan_type', 'completed')
+                ->orderByDesc('scanned_at')
+                ->first(['receiver', 'scanned_by', 'scanned_at']);
+
+            if ($scan) {
+                $d->setAttribute('receiver', $scan->receiver);
+                $d->setAttribute('scanned_by', $scan->scanner?->name);
             }
-            // Fallback: if claimed_by is still empty, use the head of family (set at distribution level)
         });
+        $authenticatedMember = $request->attributes->get('authenticated_household_member');
 
         $householdMembers = $family->household_member()
             ->orderBy('household_member_number')
@@ -64,6 +72,10 @@ class FamilyDistributionController extends Controller
             ],
             'distributions'    => $distributions,
             'household_members' => $householdMembers,
+            'authenticated_member' => $authenticatedMember ? [
+                'id' => $authenticatedMember->id,
+                'name' => $authenticatedMember->display_name,
+            ] : null,
         ]);
     }
 
@@ -71,21 +83,28 @@ class FamilyDistributionController extends Controller
     {
         abort_unless($item->family_id === $request->user()->id, 403);
 
-        if ($item->status === 'completed') {
-            return response()->json([
-                'message' => 'This distribution is already completed.',
-                'distribution' => $item->load('resource:id,name,unit', 'additionalResource:id,name,unit', 'location:id,name'),
-            ], 409);
-        }
+        $authenticatedMember = $request->attributes->get('authenticated_household_member');
+        abort_unless(
+            $authenticatedMember instanceof HouseholdMember &&
+                (int) $authenticatedMember->family_id === (int) $request->user()->id,
+            403,
+            'Only a registered household member account can confirm receipt.'
+        );
 
-        if ($item->status === 'cancelled') {
-            return response()->json([
-                'message' => 'This distribution was cancelled.',
-            ], 422);
-        }
+        DB::transaction(function () use ($item, $authenticatedMember) {
+            $distribution = Distribution::query()->lockForUpdate()->findOrFail($item->id);
 
-        $item->applyStock();
-        $item->update(['status' => 'completed']);
+            abort_if($distribution->excluded, 422, 'This family is excluded from the distribution.');
+            abort_unless($distribution->status === 'pending', 422, 'This distribution is not awaiting confirmation.');
+            $windowError = $distribution->claimWindowError();
+            abort_if($windowError !== null, 422, $windowError);
+
+            $distribution->applyStock();
+            $distribution->update([
+                'status' => 'completed',
+                'claimed_by' => $authenticatedMember->display_name,
+            ]);
+        });
 
         return response()->json([
             'message' => 'Distribution confirmed.',

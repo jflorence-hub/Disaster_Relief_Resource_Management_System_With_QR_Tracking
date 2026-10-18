@@ -4,6 +4,7 @@ import Modal from '@/components/modal';
 import { Distribution, DistributionItem, Location, ResourceItem, ResourceSet, StockWarning } from '@/types/models';
 import { Head, router, useForm } from '@inertiajs/react';
 import {
+    Ban,
     CalendarPlus,
     CheckCircle2,
     Clock3,
@@ -15,7 +16,7 @@ import {
     Truck,
     Users,
 } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
 
 interface Family {
@@ -37,6 +38,7 @@ interface Staff {
     id: number;
     name: string;
     purok_id?: number | null;
+    purok?: { id: number; name: string } | null;
 }
 
 interface DistributionRow {
@@ -63,6 +65,18 @@ interface FormData {
     assignment_mode: 'set' | 'individual' | '';
     resource_set_id: number | string;
     items: { resource_id: number | string; quantity: number | string }[];
+}
+
+interface ScheduleSummary {
+    id: number;
+    scheduled_at: string;
+    resource_name: string | null;
+    location_name: string | null;
+    location_id: number | null;
+    cancelled_at: string | null;
+    active_count: number;
+    completed_count: number;
+    cancelled_count: number;
 }
 
 const emptyForm: FormData = {
@@ -107,6 +121,8 @@ export default function DistributionPage({
     userRole,
     allLocations = [],
     resourceSets = [],
+    schedules = [],
+    scheduleFamilyNeeds = { all: { families: 0, quantity: 0 }, by_location: {} },
 }: {
     distributions: Distribution[];
     resources: ResourceItem[];
@@ -120,15 +136,30 @@ export default function DistributionPage({
     families: Family[];
     currentDate: string;
     scheduledAt: string;
+    scheduleFamilyNeeds: {
+        all: { families: number; quantity: number };
+        by_location: Record<string, { families: number; quantity: number }>;
+    };
     defaultSetResource?: ResourceItem | null;
     userRole: string;    allLocations?: { id: number; name: string }[];
     resourceSets?: ResourceSet[];
+    schedules?: ScheduleSummary[];
 }) {
     const [search, setSearch] = useState(filters.search ?? '');
     const [selectedStaffId, setSelectedStaffId] = useState('');
     const [filterLocationId, setFilterLocationId] = useState(filters.location_id ?? '');
     const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'pending' | 'completed' | 'excluded'>('all');
     const [showScheduleModal, setShowScheduleModal] = useState(false);
+    const [scheduleFilterId, setScheduleFilterId] = useState("");
+    const [scheduleAction, setScheduleAction] = useState<{
+        schedule: ScheduleSummary;
+        action: 'cancel' | 'delete';
+    } | null>(null);
+    const [scheduleError, setScheduleError] = useState('');
+
+    // Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const rowsPerPage = 15;
 
     const [scheduleValue, setScheduleValue] = useState(
         scheduledAt || currentDate,
@@ -138,26 +169,87 @@ export default function DistributionPage({
     const [scheduleResourceId, setScheduleResourceId] = useState('');
     // Selected location for the new distribution schedule
     const [scheduleLocationId, setScheduleLocationId] = useState('');
+    // Assignment mode: 'individual' or 'set'
+    const [scheduleMode, setScheduleMode] = useState<'individual' | 'set'>('individual');
+    // Selected resource set for the schedule (when mode = 'set')
+    const [scheduleResourceSetId, setScheduleResourceSetId] = useState('');
+
+    // Resources filtered by the selected location in the schedule form
+    const scheduleResources = useMemo(() => {
+        if (!scheduleLocationId) return resources;
+        return resources.filter((r) => String(r.location_id) === scheduleLocationId);
+    }, [resources, scheduleLocationId]);
+
+    // Resource sets filtered by the selected location
+    const scheduleSets = useMemo(() => {
+        if (!scheduleLocationId) return resourceSets;
+        return resourceSets.filter((s) => String(s.location_id) === scheduleLocationId);
+    }, [resourceSets, scheduleLocationId]);
+
+    const selectedScheduleNeeds = scheduleLocationId
+        ? scheduleFamilyNeeds.by_location[scheduleLocationId] ?? { families: 0, quantity: 0 }
+        : scheduleFamilyNeeds.all;
+    const selectedScheduleResource = scheduleResources.find(
+        (resource) => String(resource.id) === scheduleResourceId,
+    );
+    const selectedScheduleSet = scheduleSets.find(
+        (set) => String(set.id) === scheduleResourceSetId,
+    );
+    const scheduleHasCapacity = scheduleMode === 'individual'
+        ? (selectedScheduleResource?.available_quantity ?? selectedScheduleResource?.quantity ?? 0)
+            >= selectedScheduleNeeds.quantity
+        : (selectedScheduleSet?.available_sets ?? selectedScheduleSet?.sets_remaining ?? 0)
+            >= selectedScheduleNeeds.families;
 
     const saveSchedule = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
 
-        if (!scheduleResourceId || !scheduleValue) {
-            return;
+        if (!scheduleValue) return;
+
+        if (scheduleMode === 'individual' && !scheduleResourceId) return;
+        if (scheduleMode === 'set' && !scheduleResourceSetId) return;
+        setScheduleError('');
+
+        // For set mode, pick the first resource from the set as the required resource_id
+        const payload: Record<string, string | number | null> = {
+            scheduled_at: scheduleValue,
+            location_id: scheduleLocationId ? Number(scheduleLocationId) : null,
+        };
+
+        if (scheduleMode === 'set') {
+            payload.assignment_mode = 'set';
+            payload.resource_set_id = Number(scheduleResourceSetId);
+            // resource_id is required by the backend — use the first item's resource
+            const selectedSet = resourceSets.find((s) => String(s.id) === scheduleResourceSetId);
+            const firstResourceId = selectedSet?.items?.[0]?.resource_id;
+            payload.resource_id = firstResourceId ?? Number(scheduleResourceId);
+        } else {
+            payload.assignment_mode = 'individual';
+            payload.resource_id = Number(scheduleResourceId);
         }
 
-        router.put(
-            '/distribution-schedule',
-            {
-                scheduled_at: scheduleValue,
-                resource_id: Number(scheduleResourceId),
-                location_id: scheduleLocationId ? Number(scheduleLocationId) : null,
-            },
-            {
-                preserveScroll: true,
-                onSuccess: () => setShowScheduleModal(false),
-            },
-        );
+        router.put('/distribution-schedule', payload, {
+            preserveScroll: true,
+            onSuccess: () => setShowScheduleModal(false),
+            onError: (errors) => setScheduleError(Object.values(errors)[0] ?? 'Unable to save this schedule.'),
+        });
+    };
+
+    const confirmScheduleAction = () => {
+        if (!scheduleAction) return;
+        const { schedule, action } = scheduleAction;
+        const options = {
+            preserveScroll: true,
+            onError: (errors: Record<string, string>) => setScheduleError(Object.values(errors)[0] ?? 'Unable to update this schedule.'),
+            onSuccess: () => setScheduleError(''),
+            onFinish: () => setScheduleAction(null),
+        };
+
+        if (action === 'cancel') {
+            router.post(`/distribution-schedule/${schedule.id}/cancel`, {}, options);
+        } else {
+            router.delete(`/distribution-schedule/${schedule.id}`, options);
+        }
     };
 
     // ============================================================
@@ -217,12 +309,22 @@ export default function DistributionPage({
                 return;
             }
 
+            if (
+                scheduleFilterId &&
+                String(distribution.schedule_id ?? '') !== scheduleFilterId
+            ) {
+                return;
+            }
+
             const existing = latestDistributionByFamily.get(familyId);
 
             if (
                 !existing ||
                 new Date(distribution.distribution_date).getTime() >
-                    new Date(existing.distribution_date).getTime()
+                    new Date(existing.distribution_date).getTime() ||
+                (new Date(distribution.distribution_date).getTime() ===
+                    new Date(existing.distribution_date).getTime() &&
+                    distribution.id > existing.id)
             ) {
                 latestDistributionByFamily.set(familyId, distribution);
             }
@@ -248,6 +350,7 @@ export default function DistributionPage({
                 // showing deleted or unavailable resources.
 
                 reliefName:
+                    distribution.resource_set?.name ??
                     distribution.resource?.name ??
                     resources.find(
                         (resource) =>
@@ -268,7 +371,7 @@ export default function DistributionPage({
         });
 
         return rows;
-    }, [families, distributions, resources]);
+    }, [families, distributions, resources, scheduleFilterId]);
 
     // ============================================================
     // BARANGAY FILTER — now handled server-side via Inertia visit
@@ -345,6 +448,29 @@ export default function DistributionPage({
                 return filteredRows;
         }
     }, [filteredRows, activeStatusTab]);
+
+    // Filter by selected schedule
+    const scheduleFilteredRows = useMemo(() => {
+        if (!scheduleFilterId) return tabFilteredRows;
+        return tabFilteredRows.filter((row) =>
+            String(row.distribution.schedule_id ?? "") === scheduleFilterId
+        );
+    }, [tabFilteredRows, scheduleFilterId]);
+
+    // ============================================================
+    // PAGINATION
+    // ============================================================
+    const totalPages = Math.max(1, Math.ceil(scheduleFilteredRows.length / rowsPerPage));
+    const safePage = Math.min(currentPage, totalPages);
+    const paginatedRows = scheduleFilteredRows.slice(
+        (safePage - 1) * rowsPerPage,
+        safePage * rowsPerPage,
+    );
+
+    // Reset to page 1 when filters or tab change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [search, activeStatusTab, selectedStaffId, filterLocationId, scheduleFilterId]);
 
     // ============================================================
     // STATUS
@@ -464,11 +590,11 @@ export default function DistributionPage({
         setStockOk(false);
 
         if (distribution.assignment_mode === 'set' && distribution.resource_set_id) {
-            runStockCheck('set', distribution.resource_set_id, undefined, distribution.location_id ?? undefined);
+            runStockCheck('set', distribution.resource_set_id, undefined, distribution.location_id ?? undefined, distribution.id);
         } else if (distribution.assignment_mode === 'individual' && distribution.items?.length) {
             runStockCheck('individual', undefined, distribution.items.map((i: DistributionItem) => ({
                 resource_id: i.resource_id, quantity: i.quantity,
-            })), distribution.location_id ?? undefined);
+            })), distribution.location_id ?? undefined, distribution.id);
         }
     };
 
@@ -668,6 +794,7 @@ export default function DistributionPage({
         resourceSetId?: number | string,
         items?: { resource_id: number | string; quantity: number | string }[],
         locationId?: number | string,
+        distributionId?: number,
     ) => {
         setStockCheckLoading(true);
         setStockWarnings([]);
@@ -678,6 +805,7 @@ export default function DistributionPage({
             if (mode === 'set') body.resource_set_id = resourceSetId;
             if (mode === 'individual') body.items = items;
             if (locationId) body.location_id = locationId;
+            if (distributionId) body.distribution_id = distributionId;
 
             const csrfMeta = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]');
             const response = await fetch('/distribution/check-stock', {
@@ -813,8 +941,26 @@ export default function DistributionPage({
                             <option key={member.id} value={member.id}>
                                 {member.name}
                                 {member.purok_id
-                                    ? ` — Purok ${member.purok_id}`
+                                    ? ` — ${member.purok?.name ?? ('Purok ' + member.purok_id)}`
                                     : ''}
+                            </option>
+                        ))}
+                    </select>
+                )}
+
+                {/* SCHEDULE FILTER */}
+                {userRole === 'admin' && schedules.length > 0 && (
+                    <select
+                        className="input-field sm:w-64"
+                        value={scheduleFilterId}
+                        onChange={(e) => setScheduleFilterId(e.target.value)}
+                    >
+                        <option value="">All Schedules</option>
+                        {schedules.map((s) => (
+                            <option key={s.id} value={String(s.id)}>
+                                #{s.id} — {new Date(s.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                {s.resource_name ? ` · ${s.resource_name}` : ''}
+                                {s.location_name ? ` · ${s.location_name}` : ''}
                             </option>
                         ))}
                     </select>
@@ -854,9 +1000,19 @@ export default function DistributionPage({
                 title="New Distribution Schedule"
             >
                 <form onSubmit={saveSchedule} className="space-y-4">
+                    {scheduleError && (
+                        <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+                            {scheduleError}
+                        </p>
+                    )}
                     <p className="text-xs text-slate-500">
-                        Set the date, location, and relief for all family distribution records.
+                        Set the date, location, and relief for active families at the selected location, or across all locations.
                     </p>
+                    {selectedScheduleNeeds.families === 0 && (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">
+                            No active families are available for this location.
+                        </p>
+                    )}
                     <div>
                         <label className="label">Date and time</label>
                         <input
@@ -872,9 +1028,13 @@ export default function DistributionPage({
                         <select
                             className="input-field"
                             value={scheduleLocationId}
-                            onChange={(e) => setScheduleLocationId(e.target.value)}
+                            onChange={(e) => {
+                                setScheduleLocationId(e.target.value);
+                                setScheduleResourceId('');
+                                setScheduleResourceSetId('');
+                            }}
                         >
-                            <option value="">Select location</option>
+                            <option value="">All locations</option>
                             {locations.map((location) => (
                                 <option key={location.id} value={String(location.id)}>
                                     {location.name}
@@ -882,22 +1042,106 @@ export default function DistributionPage({
                             ))}
                         </select>
                     </div>
+
+                    {/* Assignment mode toggle */}
                     <div>
-                        <label className="label">Relief resource</label>
-                        <select
-                            className="input-field"
-                            value={scheduleResourceId}
-                            onChange={(e) => setScheduleResourceId(e.target.value)}
-                            required
-                        >
-                            <option value="">Select relief resource</option>
-                            {resources.map((resource) => (
-                                <option key={resource.id} value={String(resource.id)}>
-                                    {resource.name}
-                                </option>
-                            ))}
-                        </select>
+                        <label className="label">Assignment type</label>
+                        <div className="flex gap-2">
+                            <button
+                                type="button"
+                                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                                    scheduleMode === 'individual'
+                                        ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                                }`}
+                                onClick={() => { setScheduleMode('individual'); setScheduleResourceSetId(''); }}
+                            >
+                                Individual Resource
+                            </button>
+                            <button
+                                type="button"
+                                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                                    scheduleMode === 'set'
+                                        ? 'border-blue-600 bg-blue-50 text-blue-700'
+                                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                                }`}
+                                onClick={() => { setScheduleMode('set'); setScheduleResourceId(''); }}
+                            >
+                                Resource Set
+                            </button>
+                        </div>
                     </div>
+
+                    {/* Individual resource dropdown */}
+                    {scheduleMode === 'individual' && (
+                        <div>
+                            <label className="label">Relief resource</label>
+                            <select
+                                className="input-field"
+                                value={scheduleResourceId}
+                                onChange={(e) => setScheduleResourceId(e.target.value)}
+                                required
+                            >
+                                <option value="">Select relief resource</option>
+                                {scheduleResources.map((resource) => (
+                                    <option
+                                        key={resource.id}
+                                        value={String(resource.id)}
+                                        disabled={(resource.available_quantity ?? resource.quantity) < selectedScheduleNeeds.quantity}
+                                    >
+                                        {resource.name} ({resource.available_quantity ?? resource.quantity} {resource.unit} available)
+                                        {scheduleLocationId ? '' : resource.location ? ` — ${resource.location.name}` : ''}
+                                    </option>
+                                ))}
+                            </select>
+                            {scheduleResources.length === 0 && (
+                                <p className="mt-1 text-xs text-amber-600">
+                                    No resources found{scheduleLocationId ? ' at this location' : ''}.
+                                </p>
+                            )}
+                            {selectedScheduleNeeds.families > 0 && (
+                                <p className="mt-1 text-xs text-slate-500">
+                                    {selectedScheduleNeeds.quantity} {scheduleResources.find((resource) => String(resource.id) === scheduleResourceId)?.unit ?? 'units'} required for {selectedScheduleNeeds.families} active families. Reserved stock is unavailable to other schedules.
+                                </p>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Resource set dropdown */}
+                    {scheduleMode === 'set' && (
+                        <div>
+                            <label className="label">Resource set</label>
+                            <select
+                                className="input-field"
+                                value={scheduleResourceSetId}
+                                onChange={(e) => setScheduleResourceSetId(e.target.value)}
+                                required
+                            >
+                                <option value="">Select resource set</option>
+                                {scheduleSets.map((set) => (
+                                    <option
+                                        key={set.id}
+                                        value={String(set.id)}
+                                        disabled={(set.available_sets ?? set.sets_remaining ?? 0) < selectedScheduleNeeds.families}
+                                    >
+                                        {set.name} ({set.items?.length ?? 0} items, {set.available_sets ?? set.sets_remaining ?? 0} available)
+                                        {scheduleLocationId ? '' : set.location ? ` — ${set.location.name}` : ''}
+                                    </option>
+                                ))}
+                            </select>
+                            {scheduleSets.length === 0 && (
+                                <p className="mt-1 text-xs text-amber-600">
+                                    No resource sets found{scheduleLocationId ? ' at this location' : ''}.
+                                </p>
+                            )}
+                            {selectedScheduleNeeds.families > 0 && (
+                                <p className="mt-1 text-xs text-slate-500">
+                                    {selectedScheduleNeeds.families} active families need one set each. Reserved sets are unavailable to other schedules.
+                                </p>
+                            )}
+                        </div>
+                    )}
+
                     <div className="flex justify-end gap-2 pt-1">
                         <button
                             type="button"
@@ -909,14 +1153,75 @@ export default function DistributionPage({
                         <button
                             type="submit"
                             className="btn-primary"
-                            disabled={!scheduleResourceId || !scheduleValue}
+                            disabled={
+                                !scheduleValue ||
+                                selectedScheduleNeeds.families === 0 ||
+                                !scheduleHasCapacity ||
+                                (scheduleMode === 'individual' && !scheduleResourceId) ||
+                                (scheduleMode === 'set' && !scheduleResourceSetId)
+                            }
                         >
                             Schedule Distribution
                         </button>
                     </div>
                 </form>
+
+                <div className="mt-6 border-t border-slate-200 pt-4">
+                    <h3 className="mb-3 text-sm font-semibold text-slate-800">Existing schedules</h3>
+                    {schedules.length === 0 ? (
+                        <p className="text-sm text-slate-500">No schedules have been created.</p>
+                    ) : (
+                        <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                            {schedules.map((schedule) => (
+                                <div key={schedule.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 p-3">
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-medium text-slate-800">
+                                            {new Date(schedule.scheduled_at).toLocaleString()}
+                                            {schedule.cancelled_at && (
+                                                <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">Cancelled</span>
+                                            )}
+                                        </p>
+                                        <p className="truncate text-xs text-slate-500">
+                                            {schedule.resource_name ?? 'Resource'}{schedule.location_name ? ` · ${schedule.location_name}` : ' · All locations'}
+                                            {' · '}{schedule.active_count} active, {schedule.completed_count} completed, {schedule.cancelled_count} cancelled
+                                        </p>
+                                    </div>
+                                    {schedule.active_count > 0 && !schedule.cancelled_at && (
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1 rounded-md border border-amber-200 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                                            onClick={() => setScheduleAction({ schedule, action: 'cancel' })}
+                                        >
+                                            <Ban size={13} /> Cancel
+                                        </button>
+                                    )}
+                                    {schedule.completed_count === 0 && (
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                                            onClick={() => setScheduleAction({ schedule, action: 'delete' })}
+                                        >
+                                            <Trash2 size={13} /> Delete
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </Modal>
             )} {/* end admin-only schedule modal */}
+
+            <ConfirmDialog
+                open={!!scheduleAction}
+                onClose={() => setScheduleAction(null)}
+                onConfirm={confirmScheduleAction}
+                title={scheduleAction?.action === 'cancel' ? 'Cancel schedule?' : 'Delete schedule?'}
+                confirmLabel={scheduleAction?.action === 'cancel' ? 'Cancel schedule' : 'Delete schedule'}
+                message={scheduleAction?.action === 'cancel'
+                    ? 'All pending and in-transit distributions in this schedule will be cancelled. Completed distributions are kept, and reserved resources will be released.'
+                    : 'This permanently deletes the schedule and its distributions. Schedules with completed distributions cannot be deleted.'}
+            />
 
             {/* DISTRIBUTION TABLE — visible to both admin and staff */}
             <div className="card overflow-x-auto p-0">
@@ -957,6 +1262,7 @@ export default function DistributionPage({
                 <table className="w-full text-sm">
                     <thead>
                         <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs text-slate-500 uppercase">
+                            <th className="px-3 py-3 w-10 text-center">#</th>
                             <th className="px-4 py-3">Family</th>
 
                             <th className="px-4 py-3">Family Head</th>
@@ -974,10 +1280,10 @@ export default function DistributionPage({
                     </thead>
 
                     <tbody>
-                        {tabFilteredRows.length === 0 && (
+                        {paginatedRows.length === 0 && (
                             <tr>
                                 <td
-                                    colSpan={7}
+                                    colSpan={8}
                                     className="px-4 py-12 text-center text-slate-400"
                                 >
                                     No families found.
@@ -985,11 +1291,16 @@ export default function DistributionPage({
                             </tr>
                         )}
 
-                        {tabFilteredRows.map((row) => (
+                        {paginatedRows.map((row, idx) => (
                             <tr
                                 key={row.distribution.id}
                                 className="border-b border-slate-50 hover:bg-slate-50"
                             >
+                                {/* ROW NUMBER */}
+                                <td className="px-3 py-3 text-center text-xs text-slate-400">
+                                    {(safePage - 1) * rowsPerPage + idx + 1}
+                                </td>
+
                                 {/* FAMILY */}
 
                                 <td className="px-4 py-3">
@@ -1148,6 +1459,40 @@ export default function DistributionPage({
                         ))}
                     </tbody>
                 </table>
+
+                {/* PAGINATION CONTROLS */}
+                {scheduleFilteredRows.length > rowsPerPage && (
+                    <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-sm">
+                        <p className="text-xs text-slate-500">
+                            Showing <span className="font-medium">{(safePage - 1) * rowsPerPage + 1}</span>
+                            {' '}–{' '}
+                            <span className="font-medium">{Math.min(safePage * rowsPerPage, scheduleFilteredRows.length)}</span>
+                            {' '}of{' '}
+                            <span className="font-medium">{tabFilteredRows.length}</span> families
+                        </p>
+                        <div className="flex items-center gap-1">
+                            <button
+                                type="button"
+                                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={safePage <= 1}
+                            >
+                                ← Prev
+                            </button>
+                            <span className="px-2 text-xs text-slate-500">
+                                Page <span className="font-medium">{safePage}</span> of {totalPages}
+                            </span>
+                            <button
+                                type="button"
+                                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                disabled={safePage >= totalPages}
+                            >
+                                Next →
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* EDIT DISTRIBUTION MODAL — admin only */}
@@ -1240,15 +1585,21 @@ export default function DistributionPage({
                                         value={form.data.resource_set_id}
                                         onChange={(e) => {
                                             form.setData('resource_set_id', e.target.value);
+
                                             if (e.target.value) {
-                                                runStockCheck('set', e.target.value, undefined, form.data.location_id || undefined);
+                                                runStockCheck('set', e.target.value, undefined, form.data.location_id || undefined, editingDistribution?.id);
                                             }
                                         }}
                                     >
                                         <option value="">— Select a set —</option>
                                         {resourceSets.map((set) => (
-                                            <option key={set.id} value={set.id}>
-                                                {set.name}{set.disaster ? ` (${set.disaster})` : ''}
+                                            <option
+                                                key={set.id}
+                                                value={set.id}
+                                                disabled={(set.available_sets ?? set.sets_remaining ?? 0) < 1
+                                                    && String(form.data.resource_set_id) !== String(set.id)}
+                                            >
+                                                {set.name}{set.disaster ? ` (${set.disaster})` : ''} — {set.available_sets ?? set.sets_remaining ?? 0} available
                                             </option>
                                         ))}
                                     </select>
@@ -1258,7 +1609,11 @@ export default function DistributionPage({
                                     {/* Preview selected set items */}
                                     {form.data.resource_set_id && (() => {
                                         const selectedSet = resourceSets.find((s) => String(s.id) === String(form.data.resource_set_id));
-                                        if (!selectedSet?.items?.length) return null;
+
+                                        if (!selectedSet?.items?.length) {
+                                            return null;
+                                        }
+
                                         return (
                                             <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 p-3">
                                                 <p className="mb-1.5 text-xs font-medium text-slate-500 uppercase">Set Contents</p>
@@ -1284,37 +1639,45 @@ export default function DistributionPage({
                                         {resources.map((r) => {
                                             const checked = form.data.items.some((i) => Number(i.resource_id) === r.id);
                                             const qty = form.data.items.find((i) => Number(i.resource_id) === r.id)?.quantity ?? 1;
+                                            const currentItemReservation = editingDistribution?.items?.find((i) => i.resource_id === r.id)?.quantity ?? 0;
+                                            const available = (r.available_quantity ?? r.quantity) + currentItemReservation;
+
                                             return (
                                                 <div key={r.id} className={`flex items-center gap-3 px-3 py-2 border-b border-slate-50 last:border-0 ${checked ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
                                                     <input
                                                         type="checkbox"
                                                         checked={checked}
+                                                        disabled={!checked && available < 1}
                                                         onChange={() => {
                                                             let newItems;
+
                                                             if (checked) {
                                                                 newItems = form.data.items.filter((i) => Number(i.resource_id) !== r.id);
                                                             } else {
                                                                 newItems = [...form.data.items, { resource_id: r.id, quantity: 1 }];
                                                             }
+
                                                             form.setData('items', newItems);
+
                                                             if (newItems.length > 0) {
-                                                                runStockCheck('individual', undefined, newItems, form.data.location_id || undefined);
+                                                                runStockCheck('individual', undefined, newItems, form.data.location_id || undefined, editingDistribution?.id);
                                                             }
                                                         }}
                                                         className="h-4 w-4 rounded border-slate-300 text-blue-600"
                                                     />
-                                                    <span className="flex-1 text-sm text-slate-700">{r.name} <span className="text-xs text-slate-400">({r.unit})</span></span>
+                                                    <span className="flex-1 text-sm text-slate-700">{r.name} <span className="text-xs text-slate-400">({available} {r.unit} available)</span></span>
                                                     {checked && (
                                                         <input
                                                             type="number"
                                                             min={1}
+                                                            max={available}
                                                             value={qty}
                                                             onChange={(e) => {
                                                                 const newItems = form.data.items.map((i) =>
-                                                                    Number(i.resource_id) === r.id ? { ...i, quantity: Number(e.target.value) } : i
+                                                                    Number(i.resource_id) === r.id ? { ...i, quantity: Math.min(Math.max(1, Number(e.target.value)), available) } : i
                                                                 );
                                                                 form.setData('items', newItems);
-                                                                runStockCheck('individual', undefined, newItems, form.data.location_id || undefined);
+                                                                runStockCheck('individual', undefined, newItems, form.data.location_id || undefined, editingDistribution?.id);
                                                             }}
                                                             className="input-field w-20 py-1 text-sm"
                                                         />
@@ -1323,6 +1686,9 @@ export default function DistributionPage({
                                             );
                                         })}
                                     </div>
+                                    {form.errors.items && (
+                                        <p className="mt-1 text-xs text-red-500">{form.errors.items}</p>
+                                    )}
                                 </div>
                             )}
 
@@ -1334,7 +1700,7 @@ export default function DistributionPage({
                                     )}
                                     {!stockCheckLoading && stockWarnings.length > 0 && (
                                         <div className="rounded-md bg-amber-50 border border-amber-200 p-3">
-                                            <p className="text-sm font-semibold text-amber-800 mb-1.5">Warning: stock may not cover all families — you can still proceed
+                                            <p className="text-sm font-semibold text-amber-800 mb-1.5">Not enough unreserved stock for this distribution
                                             </p>
                                             <ul className="text-sm text-amber-700 space-y-1">
                                                 {stockWarnings.map((w) => (
@@ -1344,7 +1710,7 @@ export default function DistributionPage({
                                                     </li>
                                                 ))}
                                             </ul>
-                                            <p className="text-xs text-amber-600 mt-2">You can still save — this is a warning only.</p>
+                                            <p className="text-xs text-amber-600 mt-2">Saving is blocked when the selected distribution would exceed unreserved stock.</p>
                                         </div>
                                     )}
                                     {!stockCheckLoading && stockOk && (
@@ -1376,8 +1742,10 @@ export default function DistributionPage({
                                         <option
                                             key={resource.id}
                                             value={resource.id}
+                                            disabled={(resource.available_quantity ?? resource.quantity) < 1
+                                                && String(form.data.resource_id) !== String(resource.id)}
                                         >
-                                            {resource.name}
+                                            {resource.name} — {resource.available_quantity ?? resource.quantity} available
                                         </option>
                                     ))}
                                 </select>
@@ -1413,13 +1781,15 @@ export default function DistributionPage({
                                             key={resource.id}
                                             value={resource.id}
                                             disabled={
+                                                ((resource.available_quantity ?? resource.quantity) < 1
+                                                    && String(form.data.additional_resource_id) !== String(resource.id)) ||
                                                 String(resource.id) ===
                                                 String(
                                                     form.data.resource_id,
                                                 )
                                             }
                                         >
-                                            {resource.name}
+                                            {resource.name} — {resource.available_quantity ?? resource.quantity} available
                                         </option>
                                     ))}
                                 </select>

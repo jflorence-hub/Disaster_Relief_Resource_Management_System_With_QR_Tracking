@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Distribution;
+use App\Models\Family;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,7 @@ class DistributionController extends Controller
         // Try distribution QR code first (DIST-XXXXXXXXXX)
         $distribution = Distribution::with([
             'resource:id,name,unit',
+            'resourceSet:id,name',
             'additionalResource:id,name,unit',
             'location:id,name',
             'family:id,family_id,head_name,phone,household_member,purok_id,location_id,qr_code',
@@ -32,16 +34,19 @@ class DistributionController extends Controller
 
         if (! $distribution) {
             // Try family QR code (FAM-QR-XXXXXXXXXX) — return the family's latest pending distribution
-            $family = Family::where('qr_code', $qr)->first();
+            $family = Family::where('qr_code', $qr)
+                ->orWhere('family_id', $qr)
+                ->first();
 
             if ($family) {
                 $distribution = Distribution::with([
                     'resource:id,name,unit',
+                    'resourceSet:id,name',
                     'additionalResource:id,name,unit',
                     'location:id,name',
                 ])
                 ->where('family_id', $family->id)
-                ->whereNotIn('status', ['cancelled', 'completed'])
+                ->whereNotIn('status', ['cancelled'])
                 ->orderByDesc('distribution_date')
                 ->orderByDesc('id')
                 ->first();
@@ -158,10 +163,30 @@ class DistributionController extends Controller
             ], 422);
         }
 
+        if ($windowError = $distribution->claimWindowError()) {
+            return response()->json([
+                'message' => $windowError,
+                'distribution_not_open' => true,
+            ], 403);
+        }
+
         DB::transaction(function () use ($distribution) {
-            $distribution->applyStock();
-            $distribution->status = 'completed';
-            $distribution->save();
+            $lockedDistribution = Distribution::query()
+                ->lockForUpdate()
+                ->findOrFail($distribution->id);
+
+            abort_unless(
+                $lockedDistribution->status === 'pending' ||
+                    $lockedDistribution->status === 'in_transit',
+                409,
+                'This distribution is no longer awaiting confirmation.'
+            );
+            $windowError = $lockedDistribution->claimWindowError();
+            abort_if($windowError !== null, 403, $windowError);
+
+            $lockedDistribution->applyStock();
+            $lockedDistribution->status = 'completed';
+            $lockedDistribution->save();
         });
 
         return response()->json([

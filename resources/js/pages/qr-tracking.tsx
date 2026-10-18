@@ -231,14 +231,20 @@ export default function QrTracking({
         form.setData('receiver', '');
         setFamilyHead(fam?.head_name ?? '');
         setPurokName(fam?.purok ?? '');
-        setReliefName(fam?.latest_distribution?.resource?.name ?? '');
+        setReliefName(
+            fam?.latest_distribution?.resource_set?.name ??
+                fam?.latest_distribution?.resource?.name ??
+                '',
+        );
         setFamilyMembers([]);
         if (familyId) {
             setLoadingMembers(true);
             fetch(`/families/${familyId}/members`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(r => r.json())
                 .then(data => setFamilyMembers(data.members ?? []))
-                .catch(() => {})
+                        .catch((error) => {
+                            console.error('Failed to load household members for QR scan form.', error);
+                        })
                 .finally(() => setLoadingMembers(false));
         }
     };
@@ -467,7 +473,7 @@ export default function QrTracking({
                                                 <tr key={s.id} className="border-t border-slate-50 hover:bg-slate-50">
                                                     <td className="px-4 py-2.5 font-medium text-slate-800">{s.family?.head_name ?? '—'}</td>
                                                     <td className="px-4 py-2.5 text-slate-500">{(s.family as any)?.purok ?? '—'}</td>
-                                                    <td className="px-4 py-2.5 text-slate-500">{s.resource?.name ?? '—'}</td>
+                                                    <td className="px-4 py-2.5 text-slate-500">{s.resource_label ?? s.resource?.name ?? '—'}</td>
                                                     <td className="px-4 py-2.5 text-slate-600">{s.quantity_change > 0 ? `+${s.quantity_change}` : s.quantity_change}</td>
                                                     <td className="px-4 py-2.5 text-slate-500">{s.receiver ?? '—'}</td>
                                                     <td className="px-4 py-2.5 text-slate-500">{s.scanner?.name ?? '—'}</td>

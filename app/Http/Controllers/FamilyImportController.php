@@ -11,12 +11,35 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Inertia\Inertia;
+use Inertia\Response as InertiaResponse;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use App\Jobs\SendFamilyTemporaryPin;
 
 class FamilyImportController extends Controller
 {
+    public function index(): InertiaResponse
+    {
+        $deliveries = DB::table('family_credential_deliveries')
+            ->join('families', 'families.id', '=', 'family_credential_deliveries.family_id')
+            ->orderByDesc('family_credential_deliveries.created_at')
+            ->limit(100)
+            ->get([
+                'family_credential_deliveries.id',
+                'families.head_name',
+                'family_credential_deliveries.recipient_email as email',
+                'family_credential_deliveries.status',
+                'family_credential_deliveries.attempts',
+                'family_credential_deliveries.last_error',
+                'family_credential_deliveries.sent_at',
+            ]);
+
+        return Inertia::render('import-families', ['initialDeliveries' => $deliveries]);
+    }
+
     // --- Template download ----------------------------------------------------
 
     public function template(): Response
@@ -24,7 +47,7 @@ class FamilyImportController extends Controller
         $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
 
-        // Header metadata block (rows 1-4)
+        // Header metadata block (rows 1-8) — matches the Add Location modal
         $sheet->setCellValue('A1', 'Barangay Name');
         $sheet->setCellValue('B1', 'Barangay San Isidro');
         $sheet->setCellValue('A2', 'Barangay Captain Name');
@@ -33,17 +56,27 @@ class FamilyImportController extends Controller
         $sheet->setCellValue('B3', '09171234567');
         $sheet->setCellValue('A4', 'Barangay Captain Email');
         $sheet->setCellValue('B4', 'captain@example.com');
+        $sheet->setCellValue('A5', 'Location Type');
+        $sheet->setCellValue('B5', 'distribution_center');
+        $sheet->setCellValue('A6', 'Address');
+        $sheet->setCellValue('B6', 'Barangay San Isidro, Ormoc City');
+        $sheet->setCellValue('A7', 'City');
+        $sheet->setCellValue('B7', 'Ormoc City');
+        $sheet->setCellValue('A8', 'Capacity');
+        $sheet->setCellValue('B8', '0');
+        $sheet->setCellValue('A9', 'Operational Status');
+        $sheet->setCellValue('B9', 'active');
 
-        // Column headers (row 6)
+        // Column headers (row 11)
         $headers = ['A' => 'head_firstname', 'B' => 'head_lastname', 'C' => 'household_members', 'D' => 'purok', 'E' => 'phone', 'F' => 'email'];
         foreach ($headers as $col => $header) {
-            $sheet->setCellValue("{$col}6", $header);
+            $sheet->setCellValue("{$col}11", $header);
         }
 
-        // Sample data row (row 7)
+        // Sample data row (row 12)
         $sample = ['A' => 'Juan', 'B' => 'Dela Cruz', 'C' => 'Maria Dela Cruz, Jose Dela Cruz', 'D' => 'Purok 1', 'E' => '09181234567', 'F' => 'family@example.com'];
         foreach ($sample as $col => $val) {
-            $sheet->setCellValue("{$col}7", $val);
+            $sheet->setCellValue("{$col}12", $val);
         }
 
         $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
@@ -76,7 +109,16 @@ class FamilyImportController extends Controller
         $locationExists = ! empty($meta['barangay_name'])
             && Location::whereRaw('LOWER(TRIM(name)) = ?', [strtolower(trim($meta['barangay_name']))])->exists();
 
-        return response()->json(compact('meta', 'rows', 'errors', 'locationExists'));
+        $mailer = config('mail.default');
+        $emailTransportConfigured = ! in_array($mailer, ['log', 'array', 'failover'], true)
+            && filter_var(config('mail.from.address'), FILTER_VALIDATE_EMAIL);
+        if ($mailer === 'smtp') {
+            $emailTransportConfigured = $emailTransportConfigured
+                && config('mail.mailers.smtp.host') !== '127.0.0.1'
+                && filled(config('mail.mailers.smtp.host'));
+        }
+
+        return response()->json(compact('meta', 'rows', 'errors', 'locationExists', 'emailTransportConfigured'));
     }
 
     // --- Confirm / import -----------------------------------------------------
@@ -97,15 +139,16 @@ class FamilyImportController extends Controller
         $imported = 0;
         $skipped  = 0;
         $errors   = $parseErrors;
+        $notifications = [];
 
-        DB::transaction(function () use ($rows, $location, &$imported, &$skipped, &$errors) {
+        DB::transaction(function () use ($rows, $location, &$imported, &$skipped, &$errors, &$notifications) {
             foreach ($rows as $row) {
                 if (! empty($row['_error'])) {
                     $skipped++;
                     continue;
                 }
                 try {
-                    $this->importRow($row, $location);
+                    $notifications[] = $this->importRow($row, $location);
                     $imported++;
                 } catch (\Throwable $e) {
                     $errors[] = ['row' => $row['_row_number'], 'reason' => $e->getMessage()];
@@ -115,7 +158,50 @@ class FamilyImportController extends Controller
             }
         });
 
-        return response()->json(compact('imported', 'skipped', 'errors'));
+        return response()->json(compact('imported', 'skipped', 'errors', 'notifications'));
+    }
+
+    public function deliveryStatuses(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'ids' => 'required|array|min:1|max:100',
+            'ids.*' => 'required|integer|distinct',
+        ]);
+
+        $deliveries = DB::table('family_credential_deliveries')
+            ->join('families', 'families.id', '=', 'family_credential_deliveries.family_id')
+            ->whereIn('family_credential_deliveries.id', $data['ids'])
+            ->get([
+                'family_credential_deliveries.id',
+                'families.head_name',
+                'family_credential_deliveries.recipient_email as email',
+                'family_credential_deliveries.status',
+                'family_credential_deliveries.attempts',
+                'family_credential_deliveries.last_error',
+                'family_credential_deliveries.sent_at',
+            ]);
+
+        return response()->json(['deliveries' => $deliveries]);
+    }
+
+    public function retryDelivery(int $deliveryId): JsonResponse
+    {
+        $delivery = DB::table('family_credential_deliveries')->where('id', $deliveryId)->first();
+        abort_unless($delivery, 404);
+        abort_unless($delivery->status === 'failed', 409, 'Only failed credential emails can be retried.');
+
+        $updated = DB::table('family_credential_deliveries')
+            ->where('id', $deliveryId)
+            ->where('status', 'failed')
+            ->update([
+            'status' => 'pending',
+            'last_error' => null,
+            'updated_at' => now(),
+        ]);
+        abort_unless($updated === 1, 409, 'Only failed credential emails can be retried.');
+        SendFamilyTemporaryPin::dispatch($deliveryId);
+
+        return response()->json(['message' => 'Credential email queued for retry.']);
     }
 
     // --- Private helpers ------------------------------------------------------
@@ -137,29 +223,58 @@ class FamilyImportController extends Controller
             $data[] = $cells;
         }
 
-        // Rows 1-4 (indices 0-3): metadata - [label, value]
+        // Rows 1-9 (indices 0-8): metadata - [label, value]
+        // Extended to match the Add Location modal; backward compatible with
+        // old templates that only had rows 1-4.
         $meta = [
             'barangay_name'   => trim((string) ($data[0][1] ?? '')),
             'captain_name'    => trim((string) ($data[1][1] ?? '')),
             'captain_contact' => trim((string) ($data[2][1] ?? '')),
             'captain_email'   => trim((string) ($data[3][1] ?? '')),
+            'type'            => trim((string) ($data[4][1] ?? '')) ?: 'distribution_center',
+            'address'         => trim((string) ($data[5][1] ?? '')),
+            'city'            => trim((string) ($data[6][1] ?? '')),
+            'capacity'        => trim((string) ($data[7][1] ?? '')),
+            'status'          => trim((string) ($data[8][1] ?? '')) ?: 'active',
         ];
 
-        // Row 6 (index 5): column headers
-        $headerRow = array_map('strtolower', array_map('trim', array_map('strval', $data[5] ?? [])));
+        // Find the header row dynamically: scan for 'head_firstname' in any
+        // row rather than assuming a fixed position. This supports both the
+        // old template (headers at row 6 / index 5) and the new template
+        // (headers at row 11 / index 10).
+        $headerRowIndex = null;
+        foreach ($data as $idx => $row) {
+            $rowLower = array_map('strtolower', array_map('trim', array_map('strval', $row)));
+            if (in_array('head_firstname', $rowLower, true)) {
+                $headerRowIndex = $idx;
+                break;
+            }
+        }
+        if ($headerRowIndex === null) {
+            throw new \RuntimeException('Could not find the column header row (looking for "head_firstname").');
+        }
+
+        $headerRow = array_map('strtolower', array_map('trim', array_map('strval', $data[$headerRowIndex])));
         $colMap    = array_flip($headerRow);
 
         $required = ['head_firstname', 'head_lastname', 'purok'];
         foreach ($required as $col) {
             if (! isset($colMap[$col])) {
-                throw new \RuntimeException("Missing required column \"{$col}\" in row 6.");
+                throw new \RuntimeException("Missing required column \"{$col}\" in row " . ($headerRowIndex + 1) . ".");
             }
         }
 
         $rows   = [];
         $errors = [];
+        $existingEmails = DB::table('families')
+            ->whereNotNull('email')
+            ->pluck('email')
+            ->merge(DB::table('household_members')->whereNotNull('email')->pluck('email'))
+            ->map(fn ($email) => strtolower(trim((string) $email)))
+            ->flip();
+        $seenEmails = [];
 
-        for ($i = 6; $i < count($data); $i++) {
+        for ($i = $headerRowIndex + 1; $i < count($data); $i++) {
             $rawRow    = $data[$i];
             $rowNumber = $i + 1;
 
@@ -174,13 +289,24 @@ class FamilyImportController extends Controller
             $purokName  = $get('purok');
             $membersRaw = isset($colMap['household_members']) ? $get('household_members') : '';
             $phone      = isset($colMap['phone']) ? $get('phone') : '';
-            $email      = isset($colMap['email']) ? $get('email') : '';
+            $email      = isset($colMap['email']) ? strtolower($get('email')) : '';
 
             $rowError = null;
             if (empty($headFirst) || empty($headLast)) {
                 $rowError = 'Missing head_firstname or head_lastname.';
             } elseif (empty($purokName)) {
                 $rowError = 'Missing purok.';
+            } elseif (empty($email)) {
+                $rowError = 'Missing email — email is required because the temporary PIN is sent by email.';
+            } elseif (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $rowError = 'Invalid email address.';
+            } elseif (isset($existingEmails[strtolower($email)])) {
+                $rowError = 'Email is already used by another family or member account.';
+            } elseif (isset($seenEmails[strtolower($email)])) {
+                $rowError = 'Email is duplicated in this import file.';
+            }
+            if ($email !== '' && ! $rowError) {
+                $seenEmails[strtolower($email)] = true;
             }
 
             $memberNames = [];
@@ -224,11 +350,22 @@ class FamilyImportController extends Controller
         $location = Location::whereRaw('LOWER(TRIM(name)) = ?', [strtolower(trim($name))])->first();
 
         if ($location) {
-            // Update captain fields from the file — do not overwrite with blank values
+            // Update all location fields from the file — do not overwrite with blank values.
+            // Uses the same column names as the Add Location modal so edits are visible in the UI.
             $updates = array_filter([
+                'contact_person' => $meta['captain_name']    ?: null,
+                'contact_phone'  => $meta['captain_contact'] ?: null,
+                'email'          => $meta['captain_email']   ?: null,
+                // captain_* columns kept in sync for API / legacy compatibility
                 'captain_name'    => $meta['captain_name']    ?: null,
                 'captain_contact' => $meta['captain_contact'] ?: null,
                 'captain_email'   => $meta['captain_email']   ?: null,
+                // Modal fields that can be updated from the import file
+                'type'     => $meta['type']     ?: null,
+                'address'  => $meta['address']  ?: null,
+                'city'     => $meta['city']     ?: null,
+                'capacity' => is_numeric($meta['capacity']) ? (int) $meta['capacity'] : null,
+                'status'   => $meta['status']   ?: null,
             ], fn ($v) => $v !== null);
 
             if (! empty($updates)) {
@@ -238,7 +375,7 @@ class FamilyImportController extends Controller
             return $location;
         }
 
-        // New barangay — all 4 header fields are required before creating
+        // New barangay — captain name, contact, and email are required
         $missing = [];
         if (empty($meta['captain_name']))    $missing[] = 'Barangay Captain Name (row 2)';
         if (empty($meta['captain_contact'])) $missing[] = 'Barangay Captain Contact (row 3)';
@@ -250,12 +387,27 @@ class FamilyImportController extends Controller
             );
         }
 
+        // Derive sensible defaults for fields not present in old templates
+        $address  = $meta['address']  ?: $name;
+        $city     = $meta['city']     ?: $name;
+        $type     = in_array($meta['type'], ['warehouse', 'distribution_center', 'shelter', 'field_office'], true)
+                        ? $meta['type'] : 'distribution_center';
+        $status   = in_array($meta['status'], ['active', 'inactive', 'maintenance'], true)
+                        ? $meta['status'] : 'active';
+        $capacity = is_numeric($meta['capacity']) ? (int) $meta['capacity'] : 0;
+
         $location = Location::create([
             'name'            => $name,
-            'type'            => 'distribution_center',
-            'address'         => $name,
-            'city'            => $name,
-            'status'          => 'active',
+            'type'            => $type,
+            'address'         => $address,
+            'city'            => $city,
+            'capacity'        => $capacity,
+            'status'          => $status,
+            // Modal columns
+            'contact_person'  => $meta['captain_name'],
+            'contact_phone'   => $meta['captain_contact'],
+            'email'           => $meta['captain_email'],
+            // Legacy API columns kept in sync
             'captain_name'    => $meta['captain_name'],
             'captain_contact' => $meta['captain_contact'],
             'captain_email'   => $meta['captain_email'],
@@ -264,7 +416,7 @@ class FamilyImportController extends Controller
         return $location;
     }
 
-    private function importRow(array $row, Location $location): void
+    private function importRow(array $row, Location $location): array
     {
         $purok = Purok::whereRaw('LOWER(TRIM(name)) = ?', [strtolower($row['purok_name'])])
             ->where('location_id', $location->id)
@@ -286,15 +438,43 @@ class FamilyImportController extends Controller
             throw new \RuntimeException("Head name \"{$headName}\" is already registered.");
         }
 
+        $email = strtolower(trim((string) $row['email']));
+        if (empty($email)) {
+            throw new \RuntimeException("Email is required for \"{$headName}\" — the temporary PIN is sent by email.");
+        }
+
+        // Check for duplicate email across family and member accounts.
+        $existingEmail = Family::whereRaw('LOWER(email) = ?', [strtolower($email)])->exists()
+            || HouseholdMember::whereRaw('LOWER(email) = ?', [strtolower($email)])->exists();
+        if ($existingEmail) {
+            throw new \RuntimeException("Email \"{$email}\" is already registered to another family.");
+        }
+
+        // Generate a plaintext PIN to email, and a hashed copy for the DB
+        $plainPin = $this->generatePin();
+
         $family = Family::create([
             'head_name'        => $headName,
             'phone'            => $row['phone'],
+            'email'            => $email,
             'household_member' => max(1, $row['member_count']),
             'purok_id'         => $purok->id,
             'location_id'      => $location->id,
-            'pin'              => Hash::make($this->generatePin()),
+            'pin'              => Hash::make($plainPin),
+            'must_change_pin'  => true,
             'status'           => 'active',
         ]);
+
+        $deliveryId = DB::table('family_credential_deliveries')->insertGetId([
+            'family_id' => $family->id,
+            'recipient_email' => $email,
+            'pin_encrypted' => Crypt::encryptString($plainPin),
+            'status' => 'pending',
+            'attempts' => 0,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        SendFamilyTemporaryPin::dispatch($deliveryId)->afterCommit();
 
         foreach ($row['member_names'] as $idx => $name) {
             HouseholdMember::create([
@@ -316,6 +496,16 @@ class FamilyImportController extends Controller
             'household_member'  => $family->household_member,
             'status'            => 'pending',
         ]);
+
+        return [
+            'id' => $deliveryId,
+            'head_name' => $headName,
+            'email' => $email,
+            'status' => 'pending',
+            'attempts' => 0,
+            'last_error' => null,
+            'sent_at' => null,
+        ];
     }
 
     private function generatePin(): string

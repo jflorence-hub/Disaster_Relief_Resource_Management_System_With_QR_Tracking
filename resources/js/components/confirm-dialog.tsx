@@ -6,6 +6,7 @@ export default function ConfirmDialog({
     onConfirm,
     title = 'Are you sure?',
     message,
+    confirmLabel = 'Delete',
     processing = false,
 }: {
     open: boolean;
@@ -13,6 +14,7 @@ export default function ConfirmDialog({
     onConfirm: () => void;
     title?: string;
     message: string;
+    confirmLabel?: string;
     processing?: boolean;
 }) {
     return (
@@ -23,7 +25,7 @@ export default function ConfirmDialog({
                     Cancel
                 </button>
                 <button className="btn-danger" onClick={onConfirm} disabled={processing}>
-                    {processing ? 'Deleting…' : 'Delete'}
+                    {processing ? 'Processing…' : confirmLabel}
                 </button>
             </div>
         </Modal>

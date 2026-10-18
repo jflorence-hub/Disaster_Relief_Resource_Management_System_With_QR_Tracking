@@ -14,7 +14,7 @@ class StaffFamilyController extends Controller {
 
  public function index(Request $request): JsonResponse {
   $staff=$request->user();
-  $families=Family::query()->with(['purok:id,name','distributions'=>function($q){$q->with(['resource:id,name,unit','additionalResource:id,name,unit','location:id,name'])->orderByDesc('distribution_date');}])->where('status','active')->where('purok_id',$staff->purok_id)->orderBy('head_name')->get(['id','family_id','head_name','email','phone','household_member','purok_id','status']);
+  $families=Family::query()->with(['purok:id,name','distributions'=>function($q){$q->with(['resource:id,name,unit','resourceSet:id,name','additionalResource:id,name,unit','location:id,name'])->whereNotIn('status',['cancelled'])->orderByDesc('distribution_date')->orderByDesc('id');}])->where('status','active')->where('purok_id',$staff->purok_id)->orderBy('head_name')->get(['id','family_id','head_name','email','phone','household_member','purok_id','status']);
   $families->each(function(Family $family){$family->setAttribute('latest_distribution',$family->distributions->first());});
   return response()->json(['staff'=>['id'=>$staff->id,'name'=>$staff->name,'purok_id'=>$staff->purok_id,'purok'=>optional($staff->purok)->name],'families'=>$families]);
  }

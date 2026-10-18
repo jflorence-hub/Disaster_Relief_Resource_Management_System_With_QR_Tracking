@@ -9,7 +9,6 @@ use App\Models\Resource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Carbon;
 
 class QrTrackingController extends Controller
 {
@@ -65,18 +64,47 @@ class QrTrackingController extends Controller
             'scan_type'       => 'required|in:completed,pending,cancelled',
             'receiver'        => 'nullable|string|max:255',
             'resource_id'     => 'nullable|exists:resources,id',
+            'resource_label'  => 'nullable|string|max:255',
             'quantity_change' => 'required|integer|min:1',
             'scan_date'       => 'nullable|date',
             'scan_time'       => 'nullable|string|max:10',
         ]);
 
         // â”€â”€ Distribution-completion flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        $distribution = $this->resolveFamilyDistribution($validated);
+        if (! empty($validated['family_id']) && ! $distribution) {
+            return response()->json([
+                'message' => 'No scheduled distribution was found for this family.',
+            ], 404);
+        }
+
+        if ($distribution) {
+            if ((int) $distribution->family_id !== (int) ($validated['family_id'] ?? 0)) {
+                return response()->json([
+                    'message' => 'The scanned QR code does not belong to this family.',
+                ], 422);
+            }
+
+            if ($windowError = $distribution->claimWindowError()) {
+                return response()->json([
+                    'message' => $windowError,
+                    'distribution_not_open' => true,
+                ], 403);
+            }
+
+            $validated['receiver'] = $distribution->claimed_by
+                ?? $distribution->recipient_name
+                ?? $distribution->family?->head_name;
+            $validated['resource_label'] = $distribution->resourceSet?->name
+                ?? $distribution->resource?->name;
+        }
+
         if ($validated['scan_type'] === 'completed' && ! empty($validated['family_id'])) {
-            return $this->handleCompletionScan($validated, $request);
+            return $this->handleCompletionScan($validated, $request, $distribution);
         }
 
         // â”€â”€ Non-completion scans (pending / cancelled) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        $scan = $this->saveScan($validated, $request);
+        $scan = $this->saveScan($validated, $request, $distribution);
 
         return response()->json([
             'message' => 'Scan recorded successfully.',
@@ -90,54 +118,15 @@ class QrTrackingController extends Controller
      * Handle scan_type = 'completed' for a known family.
      * Atomically marks the distribution completed and deducts stock.
      *
-     * Returns 403 if no active distribution schedule exists for the staff
-     * member's location within the past 24 hours.
+     * Only permits scans during the distribution's scheduled claim window.
      */
-    private function handleCompletionScan(array $validated, Request $request): JsonResponse
+    private function handleCompletionScan(
+        array $validated,
+        Request $request,
+        Distribution $distribution
+    ): JsonResponse
     {
-        $staff = $request->user();
-
-        // ── Schedule firewall ────────────────────────────────────────────────
-        // Block completion scans when no distribution schedule is active for
-        // the staff member's location within the past 24 hours.
-        $activeSchedule = DB::table('distribution_schedules')
-            ->where('scheduled_at', '>=', Carbon::now()->subHours(24))
-            ->where(function ($q) use ($staff) {
-                $q->whereNull('location_id')
-                  ->orWhere('location_id', $staff?->location_id);
-            })
-            ->orderByDesc('scheduled_at')
-            ->first();
-
-        if (! $activeSchedule) {
-            return response()->json([
-                'message' => 'No active distribution schedule for your location. Contact the administrator.',
-                'no_active_schedule' => true,
-            ], 403);
-        }
-        // ── End schedule firewall ─────────────────────────────────────────────
-
         $familyId = $validated['family_id'];
-
-        // QR-code-first lookup: if the request carries a QR code that matches a
-        // distribution record, use that record directly. Fall back to the latest
-        // non-cancelled distribution for the family when no QR code match exists.
-        $qrCode = ! empty($validated['qr_code']) ? trim($validated['qr_code']) : null;
-        $distribution = null;
-
-        if ($qrCode !== null) {
-            $distribution = Distribution::where('qr_code', $qrCode)
-                ->whereNotIn('status', ['cancelled'])
-                ->first();
-        }
-
-        if ($distribution === null) {
-            $distribution = Distribution::where('family_id', $familyId)
-                ->whereNotIn('status', ['cancelled'])
-                ->orderByDesc('distribution_date')
-                ->orderByDesc('id')
-                ->first();
-        }
 
         // â”€â”€ Exclusion check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if ($distribution && $distribution->excluded) {
@@ -161,10 +150,12 @@ class QrTrackingController extends Controller
 
         // Also check the QrScan table in case the distribution record wasn't
         // updated in a previous attempt (belt-and-suspenders).
-        $existingScan = QrScan::where('family_id', $familyId)
-            ->where('scan_type', 'completed')
-            ->orderByDesc('scanned_at')
-            ->first();
+        $existingScan = $distribution
+            ? QrScan::where('distribution_id', $distribution->id)
+                ->where('scan_type', 'completed')
+                ->orderByDesc('scanned_at')
+                ->first()
+            : null;
 
         if ($existingScan) {
             $headName = $distribution?->family?->head_name
@@ -181,22 +172,33 @@ class QrTrackingController extends Controller
         }
 
         // Resolve resource_id
-        $resourceId = $validated['resource_id']
-            ?? $distribution?->resource_id
-            ?? null;
+        $resourceId = $distribution->resource_id;
 
         // â”€â”€ Atomic commit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         $scan = DB::transaction(function () use ($validated, $request, $distribution, $resourceId, $familyId) {
-            // Mark distribution completed
-            if ($distribution && $distribution->status === 'pending') {
-                $distribution->status     = 'completed';
-                $distribution->claimed_by = $validated['receiver'] ?? null;
-                $distribution->save();
-                $distribution->applyStock();
+            $lockedDistribution = Distribution::query()
+                ->lockForUpdate()
+                ->findOrFail($distribution->id);
+            $windowError = $lockedDistribution->claimWindowError();
+            abort_if($windowError !== null, 403, $windowError);
+            abort_if($lockedDistribution->excluded, 403, 'This family is excluded from this distribution schedule.');
+            abort_if($lockedDistribution->status === 'completed', 409, 'This family has already received their relief goods for this distribution schedule.');
+
+            if ($lockedDistribution->status === 'pending') {
+                $lockedDistribution->status     = 'completed';
+                $lockedDistribution->claimed_by = $validated['receiver'] ?? null;
+                $lockedDistribution->save();
+                $lockedDistribution->applyStock();
             }
 
             // Save the scan record
-            return $this->createScanRecord($validated, $request, $resourceId, $familyId);
+            return $this->createScanRecord(
+                $validated,
+                $request,
+                $resourceId,
+                $familyId,
+                $lockedDistribution->id
+            );
         });
 
         $scan->load([
@@ -216,21 +218,26 @@ class QrTrackingController extends Controller
     /**
      * Save a non-completion (pending/cancelled) scan record.
      */
-    private function saveScan(array $validated, Request $request): QrScan
+    private function saveScan(
+        array $validated,
+        Request $request,
+        ?Distribution $distribution
+    ): QrScan
     {
-        $resourceId = null;
-        if (! empty($validated['family_id'])) {
-            $dist = Distribution::where('family_id', $validated['family_id'])
-                ->whereNotIn('status', ['cancelled'])
-                ->orderByDesc('distribution_date')
-                ->first(['resource_id']);
-            $resourceId = $dist?->resource_id;
-        }
-        if (! empty($validated['resource_id'])) {
-            $resourceId = $validated['resource_id'];
+        $resourceId = $distribution
+            ? $distribution->resource_id
+            : ($validated['resource_id'] ?? null);
+        if (! $distribution) {
+            $validated['resource_label'] = $validated['resource_label'] ?? null;
         }
 
-        $scan = $this->createScanRecord($validated, $request, $resourceId, $validated['family_id'] ?? null);
+        $scan = $this->createScanRecord(
+            $validated,
+            $request,
+            $resourceId,
+            $validated['family_id'] ?? null,
+            $distribution?->id
+        );
 
         $scan->load([
             'family:id,family_id,head_name,purok_id',
@@ -243,14 +250,43 @@ class QrTrackingController extends Controller
         return $scan;
     }
 
+    private function resolveFamilyDistribution(array $validated): ?Distribution
+    {
+        $qrCode = ! empty($validated['qr_code']) ? trim($validated['qr_code']) : null;
+        $distribution = $qrCode
+            ? Distribution::with(['family', 'resource', 'resourceSet'])
+                ->where('qr_code', $qrCode)
+                ->first()
+            : null;
+
+        if (! $distribution && ! empty($validated['family_id'])) {
+            $distribution = Distribution::with(['family', 'resource', 'resourceSet'])
+                ->where('family_id', $validated['family_id'])
+                ->whereNotIn('status', ['cancelled'])
+                ->orderByDesc('distribution_date')
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        return $distribution;
+    }
+
     /**
      * Insert a QrScan row and return the model.
      */
-    private function createScanRecord(array $validated, Request $request, ?int $resourceId, ?int $familyId): QrScan
+    private function createScanRecord(
+        array $validated,
+        Request $request,
+        ?int $resourceId,
+        ?int $familyId,
+        ?int $distributionId = null
+    ): QrScan
     {
         return QrScan::create([
+            'distribution_id' => $distributionId,
             'family_id'       => $familyId,
             'resource_id'     => $resourceId,
+            'resource_label'  => $validated['resource_label'] ?? null,
             'location_id'     => $validated['location_id'] ?? null,
             'scanned_by'      => $request->user()->id,
             'scan_type'       => $validated['scan_type'],

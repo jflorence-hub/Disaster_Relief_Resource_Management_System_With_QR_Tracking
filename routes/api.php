@@ -28,6 +28,7 @@ Route::post('password/reset', [AuthController::class, 'resetPassword']);
 Route::post('login', [AuthController::class, 'login']);
 
 Route::post('family/register', [FamilyAuthController::class, 'register']);
+Route::post('family/register-member', [FamilyAuthController::class, 'registerMember']);
 Route::post('family/login', [FamilyAuthController::class, 'login']);
 Route::post('family/forgot-password', [FamilyAuthController::class, 'forgotPassword']);
 Route::post('family/reset-password', [FamilyAuthController::class, 'resetPassword']);
@@ -78,6 +79,7 @@ Route::middleware(['auth.token', 'auth.staff'])->group(function () {
 Route::middleware('auth.family')->group(function () {
     Route::get('family/me', [FamilyAuthController::class, 'me']);
     Route::post('family/logout', [FamilyAuthController::class, 'logout']);
+    Route::post('family/change-pin', [FamilyAuthController::class, 'changePin']);
 
     Route::get('family/messages', [FamilyMessageController::class, 'index']);
     Route::post('family/messages', [FamilyMessageController::class, 'store']);

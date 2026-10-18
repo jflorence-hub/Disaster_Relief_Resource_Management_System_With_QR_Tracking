@@ -29,7 +29,10 @@ type FamilyOption = { id: number; family_id: string; head_name: string };
 // ──────────────────────────────────────────────
 
 function formatTime(iso: string) {
-    return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return new Date(iso).toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+    });
 }
 
 function formatDate(iso: string) {
@@ -39,10 +42,16 @@ function formatDate(iso: string) {
     yesterday.setDate(yesterday.getDate() - 1);
     if (d.toDateString() === today.toDateString()) return 'Today';
     if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return d.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+    });
 }
 
-function groupByDate<T extends { created_at: string }>(items: T[]): { label: string; items: T[] }[] {
+function groupByDate<T extends { created_at: string }>(
+    items: T[],
+): { label: string; items: T[] }[] {
     const groups: { label: string; items: T[] }[] = [];
     let lastLabel = '';
     items.forEach((item) => {
@@ -60,12 +69,26 @@ function groupByDate<T extends { created_at: string }>(items: T[]): { label: str
 // BUBBLE
 // ──────────────────────────────────────────────
 
-function Bubble({ text, time, isSelf, name }: { text: string; time: string; isSelf: boolean; name?: string }) {
+function Bubble({
+    text,
+    time,
+    isSelf,
+    name,
+}: {
+    text: string;
+    time: string;
+    isSelf: boolean;
+    name?: string;
+}) {
     return (
         <div className={`flex ${isSelf ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[72%] ${isSelf ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}>
+            <div
+                className={`max-w-[72%] ${isSelf ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}
+            >
                 {!isSelf && name && (
-                    <span className="ml-1 text-xs font-medium text-slate-500">{name}</span>
+                    <span className="ml-1 text-xs font-medium text-slate-500">
+                        {name}
+                    </span>
                 )}
                 <div
                     className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
@@ -90,7 +113,9 @@ function DateDivider({ label }: { label: string }) {
     return (
         <div className="flex items-center gap-2 py-2">
             <div className="h-px flex-1 bg-slate-100" />
-            <span className="rounded-full bg-slate-100 px-3 py-0.5 text-xs text-slate-400">{label}</span>
+            <span className="rounded-full bg-slate-100 px-3 py-0.5 text-xs text-slate-400">
+                {label}
+            </span>
             <div className="h-px flex-1 bg-slate-100" />
         </div>
     );
@@ -118,50 +143,78 @@ export default function Messages({
     // For admin: selected staff id (string) or 'family:{id}' for family tabs
     // For staff: 'staff' (single thread with admin)
     const [activeTab, setActiveTab] = useState<string>(() => {
-        if (userRole === 'admin' && staff.length > 0) return String(staff[0].id);
+        if (userRole === 'admin' && staff.length > 0)
+            return String(staff[0].id);
         return 'staff';
     });
 
-    const form = useForm<{ message: string; staff_id: string; family_id: string }>(
-        { message: '', staff_id: userRole === 'admin' && staff.length > 0 ? String(staff[0].id) : '', family_id: '' },
-    );
+    const form = useForm<{
+        message: string;
+        staff_id: string;
+        family_id: string;
+    }>({
+        message: '',
+        staff_id:
+            userRole === 'admin' && staff.length > 0 ? String(staff[0].id) : '',
+        family_id: '',
+    });
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
-    const familyEndRef   = useRef<HTMLDivElement>(null);
-
-    useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, activeTab]);
-    useEffect(() => { familyEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [familyMessages, activeTab]);
+    const familyEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        const t = setInterval(() => router.reload({ only: ['messages', 'familyMessages'] }), 10000);
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages, activeTab]);
+    useEffect(() => {
+        familyEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [familyMessages, activeTab]);
+
+    useEffect(() => {
+        const t = setInterval(
+            () => router.reload({ only: ['messages', 'familyMessages'] }),
+            10000,
+        );
         return () => clearInterval(t);
     }, []);
 
     // ── Determine what's shown ──
 
     const isFamilyTab = activeTab.startsWith('family:');
-    const selectedFamilyId = isFamilyTab ? activeTab.replace('family:', '') : '';
-    const selectedStaffId  = !isFamilyTab && activeTab !== 'staff' ? activeTab : (activeTab === 'staff' ? '' : '');
+    const selectedFamilyId = isFamilyTab
+        ? activeTab.replace('family:', '')
+        : '';
+    const selectedStaffId =
+        !isFamilyTab && activeTab !== 'staff'
+            ? activeTab
+            : activeTab === 'staff'
+              ? ''
+              : '';
     const isStaffTab = !isFamilyTab;
 
     // Filter staff messages to only the selected staff thread (for admin)
-    const visibleMessages = userRole === 'admin' && selectedStaffId
-        ? messages.filter(
-            (m) =>
-                (String(m.sender_id) === selectedStaffId || String(m.recipient_id) === selectedStaffId)
-          )
-        : messages;
+    const visibleMessages =
+        userRole === 'admin' && selectedStaffId
+            ? messages.filter(
+                  (m) =>
+                      String(m.sender_id) === selectedStaffId ||
+                      String(m.recipient_id) === selectedStaffId,
+              )
+            : messages;
 
     const staffGroups = groupByDate(visibleMessages);
 
     // Family thread
-    const selectedFamily = families.find((f) => String(f.id) === selectedFamilyId);
-    const familyThread   = familyMessages.filter((m) => String(m.family_id) === selectedFamilyId);
-    const familyGroups   = groupByDate(familyThread);
+    const selectedFamily = families.find(
+        (f) => String(f.id) === selectedFamilyId,
+    );
+    const familyThread = familyMessages.filter(
+        (m) => String(m.family_id) === selectedFamilyId,
+    );
+    const familyGroups = groupByDate(familyThread);
 
     // Only show families that have at least one message
     const familiesWithMessages = families.filter((f) =>
-        familyMessages.some((m) => String(m.family_id) === String(f.id))
+        familyMessages.some((m) => String(m.family_id) === String(f.id)),
     );
 
     // Submit
@@ -191,7 +244,9 @@ export default function Messages({
     // Last message preview per staff member
     const lastStaffMessage = (staffId: number) => {
         const thread = messages.filter(
-            (m) => String(m.sender_id) === String(staffId) || String(m.recipient_id) === String(staffId)
+            (m) =>
+                String(m.sender_id) === String(staffId) ||
+                String(m.recipient_id) === String(staffId),
         );
         return thread[thread.length - 1];
     };
@@ -201,14 +256,14 @@ export default function Messages({
             <Head title="Messages" />
 
             <div className="flex h-[calc(100vh-10rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-
                 {/* ── LEFT SIDEBAR ── */}
                 <aside className="flex w-64 flex-shrink-0 flex-col border-r border-slate-100">
                     <div className="border-b border-slate-100 px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Conversations</p>
+                        <p className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                            Conversations
+                        </p>
                     </div>
                     <div className="flex-1 overflow-y-auto">
-
                         {/* STAFF SIDE: single admin thread */}
                         {userRole === 'staff' && (
                             <button
@@ -220,12 +275,20 @@ export default function Messages({
                                     <Users size={16} />
                                 </div>
                                 <div className="min-w-0">
-                                    <p className={`truncate text-sm font-medium ${activeTab === 'staff' ? 'text-blue-700' : 'text-slate-800'}`}>
+                                    <p
+                                        className={`truncate text-sm font-medium ${activeTab === 'staff' ? 'text-blue-700' : 'text-slate-800'}`}
+                                    >
                                         Admin — {admin?.name ?? 'Admin'}
                                     </p>
                                     <p className="truncate text-xs text-slate-400">
                                         {messages.length > 0
-                                            ? messages[messages.length - 1].message.slice(0, 30) + (messages[messages.length - 1].message.length > 30 ? '…' : '')
+                                            ? messages[
+                                                  messages.length - 1
+                                              ].message.slice(0, 30) +
+                                              (messages[messages.length - 1]
+                                                  .message.length > 30
+                                                  ? '…'
+                                                  : '')
                                             : 'No messages yet'}
                                     </p>
                                 </div>
@@ -236,14 +299,16 @@ export default function Messages({
                         {userRole === 'admin' && (
                             <>
                                 {staff.length === 0 && (
-                                    <p className="px-4 py-3 text-xs text-slate-400">No staff members yet.</p>
+                                    <p className="px-4 py-3 text-xs text-slate-400">
+                                        No staff members yet.
+                                    </p>
                                 )}
 
-                                {familiesWithMessages.length > 0 && (
-                                    <div className="border-t border-slate-100 px-4 py-2">
-                                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Staff</p>
-                                    </div>
-                                )}
+                                <div className="border-t border-slate-100 px-4 py-2">
+                                    <p className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                                        Staff
+                                    </p>
+                                </div>
                                 {staff.map((s) => {
                                     const last = lastStaffMessage(s.id);
                                     const isActive = activeTab === String(s.id);
@@ -252,49 +317,30 @@ export default function Messages({
                                             key={s.id}
                                             type="button"
                                             className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 ${isActive ? 'bg-blue-50' : ''}`}
-                                            onClick={() => selectStaff(String(s.id))}
+                                            onClick={() =>
+                                                selectStaff(String(s.id))
+                                            }
                                         >
                                             <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700">
                                                 {s.name.charAt(0).toUpperCase()}
                                             </div>
                                             <div className="min-w-0">
-                                                <p className={`truncate text-sm font-medium ${isActive ? 'text-blue-700' : 'text-slate-800'}`}>
+                                                <p
+                                                    className={`truncate text-sm font-medium ${isActive ? 'text-blue-700' : 'text-slate-800'}`}
+                                                >
                                                     {s.name}
                                                 </p>
                                                 <p className="truncate text-xs text-slate-400">
-                                                    {last ? last.message.slice(0, 28) + (last.message.length > 28 ? '…' : '') : 'No messages yet'}
-                                                </p>
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-
-                                {/* Divider before family section */}
-                                {familiesWithMessages.length > 0 && (
-                                    <div className="border-t border-slate-100 px-4 py-2">
-                                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Families</p>
-                                    </div>
-                                )}
-
-                                {familiesWithMessages.map((f) => {
-                                    const lastMsg = familyMessages.filter((m) => String(m.family_id) === String(f.id)).slice(-1)[0];
-                                    const isActive = activeTab === `family:${f.id}`;
-                                    return (
-                                        <button
-                                            key={f.id}
-                                            type="button"
-                                            className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 ${isActive ? 'bg-blue-50' : ''}`}
-                                            onClick={() => selectFamily(String(f.id))}
-                                        >
-                                            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600">
-                                                <House size={16} />
-                                            </div>
-                                            <div className="min-w-0">
-                                                <p className={`truncate text-sm font-medium ${isActive ? 'text-blue-700' : 'text-slate-800'}`}>
-                                                    {f.head_name}
-                                                </p>
-                                                <p className="truncate text-xs text-slate-400">
-                                                    {lastMsg ? lastMsg.message.slice(0, 28) + (lastMsg.message.length > 28 ? '…' : '') : f.family_id}
+                                                    {last
+                                                        ? last.message.slice(
+                                                              0,
+                                                              28,
+                                                          ) +
+                                                          (last.message.length >
+                                                          28
+                                                              ? '…'
+                                                              : '')
+                                                        : 'No messages yet'}
                                                 </p>
                                             </div>
                                         </button>
@@ -302,12 +348,71 @@ export default function Messages({
                                 })}
                             </>
                         )}
+
+                        {userRole === 'staff' && (
+                            <>
+                                <div className="border-t border-slate-100 px-4 py-2">
+                                    <p className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                                        Assigned Families
+                                    </p>
+                                </div>
+                                {familiesWithMessages.length === 0 ? (
+                                    <p className="px-4 py-3 text-xs text-slate-400">
+                                        No family messages yet.
+                                    </p>
+                                ) : (
+                                    familiesWithMessages.map((f) => {
+                                        const lastMsg = familyMessages
+                                            .filter(
+                                                (m) =>
+                                                    String(m.family_id) ===
+                                                    String(f.id),
+                                            )
+                                            .slice(-1)[0];
+                                        const isActive =
+                                            activeTab === `family:${f.id}`;
+                                        return (
+                                            <button
+                                                key={f.id}
+                                                type="button"
+                                                className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 ${isActive ? 'bg-blue-50' : ''}`}
+                                                onClick={() =>
+                                                    selectFamily(String(f.id))
+                                                }
+                                            >
+                                                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600">
+                                                    <House size={16} />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p
+                                                        className={`truncate text-sm font-medium ${isActive ? 'text-blue-700' : 'text-slate-800'}`}
+                                                    >
+                                                        {f.head_name}
+                                                    </p>
+                                                    <p className="truncate text-xs text-slate-400">
+                                                        {lastMsg
+                                                            ? lastMsg.message.slice(
+                                                                  0,
+                                                                  28,
+                                                              ) +
+                                                              (lastMsg.message
+                                                                  .length > 28
+                                                                  ? '…'
+                                                                  : '')
+                                                            : f.family_id}
+                                                    </p>
+                                                </div>
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </>
+                        )}
                     </div>
                 </aside>
 
                 {/* ── CHAT PANEL ── */}
                 <div className="flex flex-1 flex-col overflow-hidden">
-
                     {/* ── STAFF / ADMIN THREAD ── */}
                     {isStaffTab && (
                         <>
@@ -316,13 +421,27 @@ export default function Messages({
                                 {userRole === 'admin' && selectedStaffId ? (
                                     <>
                                         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700">
-                                            {(staff.find(s => String(s.id) === selectedStaffId)?.name ?? '?').charAt(0).toUpperCase()}
+                                            {(
+                                                staff.find(
+                                                    (s) =>
+                                                        String(s.id) ===
+                                                        selectedStaffId,
+                                                )?.name ?? '?'
+                                            )
+                                                .charAt(0)
+                                                .toUpperCase()}
                                         </div>
                                         <div>
                                             <p className="text-sm font-semibold text-slate-800">
-                                                {staff.find(s => String(s.id) === selectedStaffId)?.name ?? 'Staff'}
+                                                {staff.find(
+                                                    (s) =>
+                                                        String(s.id) ===
+                                                        selectedStaffId,
+                                                )?.name ?? 'Staff'}
                                             </p>
-                                            <p className="text-xs text-slate-400">Staff member</p>
+                                            <p className="text-xs text-slate-400">
+                                                Staff member
+                                            </p>
                                         </div>
                                     </>
                                 ) : (
@@ -334,18 +453,25 @@ export default function Messages({
                                             <p className="text-sm font-semibold text-slate-800">
                                                 Admin — {admin?.name ?? 'Admin'}
                                             </p>
-                                            <p className="text-xs text-slate-400">Direct chat with administration</p>
+                                            <p className="text-xs text-slate-400">
+                                                Direct chat with administration
+                                            </p>
                                         </div>
                                     </>
                                 )}
                             </div>
 
                             {/* Messages */}
-                            <div className="flex-1 overflow-y-auto bg-slate-50 px-5 py-4 space-y-1">
+                            <div className="flex-1 space-y-1 overflow-y-auto bg-slate-50 px-5 py-4">
                                 {staffGroups.length === 0 ? (
                                     <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-400">
-                                        <MessageCircle size={36} strokeWidth={1.2} />
-                                        <p className="text-sm">No messages yet. Say hello!</p>
+                                        <MessageCircle
+                                            size={36}
+                                            strokeWidth={1.2}
+                                        />
+                                        <p className="text-sm">
+                                            No messages yet. Say hello!
+                                        </p>
                                     </div>
                                 ) : (
                                     staffGroups.map((group) => (
@@ -353,16 +479,26 @@ export default function Messages({
                                             <DateDivider label={group.label} />
                                             <div className="space-y-2">
                                                 {group.items.map((m) => {
-                                                    const isSelf = userRole === 'admin'
-                                                        ? m.sender?.role === 'admin'
-                                                        : m.sender_id !== admin?.id;
+                                                    const isSelf =
+                                                        userRole === 'admin'
+                                                            ? m.sender?.role ===
+                                                              'admin'
+                                                            : m.sender_id !==
+                                                              admin?.id;
                                                     return (
                                                         <Bubble
                                                             key={m.id}
                                                             text={m.message}
-                                                            time={formatTime(m.created_at)}
+                                                            time={formatTime(
+                                                                m.created_at,
+                                                            )}
                                                             isSelf={isSelf}
-                                                            name={isSelf ? undefined : m.sender?.name}
+                                                            name={
+                                                                isSelf
+                                                                    ? undefined
+                                                                    : m.sender
+                                                                          ?.name
+                                                            }
                                                         />
                                                     );
                                                 })}
@@ -374,19 +510,29 @@ export default function Messages({
                             </div>
 
                             {/* Compose */}
-                            <form onSubmit={submitStaff} className="flex items-end gap-2 border-t border-slate-100 bg-white px-4 py-3">
+                            <form
+                                onSubmit={submitStaff}
+                                className="flex items-end gap-2 border-t border-slate-100 bg-white px-4 py-3"
+                            >
                                 <textarea
                                     className="input-field min-h-[2.5rem] flex-1 resize-none py-2 text-sm"
                                     placeholder={
                                         userRole === 'admin'
-                                            ? `Message ${staff.find(s => String(s.id) === selectedStaffId)?.name ?? 'staff'}…`
+                                            ? `Message ${staff.find((s) => String(s.id) === selectedStaffId)?.name ?? 'staff'}…`
                                             : 'Write a message to admin…'
                                     }
                                     rows={1}
                                     value={form.data.message}
-                                    onChange={(e) => form.setData('message', e.target.value)}
+                                    onChange={(e) =>
+                                        form.setData('message', e.target.value)
+                                    }
                                     onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitStaff(e as unknown as FormEvent); }
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            submitStaff(
+                                                e as unknown as FormEvent,
+                                            );
+                                        }
                                     }}
                                     required
                                     maxLength={5000}
@@ -394,7 +540,11 @@ export default function Messages({
                                 <button
                                     type="submit"
                                     className="btn-primary flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full p-0"
-                                    disabled={form.processing || (userRole === 'admin' && !form.data.staff_id)}
+                                    disabled={
+                                        form.processing ||
+                                        (userRole === 'admin' &&
+                                            !form.data.staff_id)
+                                    }
                                     title="Send"
                                 >
                                     <Send size={16} />
@@ -411,16 +561,27 @@ export default function Messages({
                                     <House size={16} />
                                 </div>
                                 <div>
-                                    <p className="text-sm font-semibold text-slate-800">{selectedFamily.head_name}</p>
-                                    <p className="text-xs text-slate-400">{selectedFamily.family_id} · Family App conversation</p>
+                                    <p className="text-sm font-semibold text-slate-800">
+                                        {selectedFamily.head_name}
+                                    </p>
+                                    <p className="text-xs text-slate-400">
+                                        {selectedFamily.family_id} · Assigned
+                                        Purok family
+                                    </p>
                                 </div>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto bg-slate-50 px-5 py-4 space-y-1">
+                            <div className="flex-1 space-y-1 overflow-y-auto bg-slate-50 px-5 py-4">
                                 {familyGroups.length === 0 ? (
                                     <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-400">
-                                        <MessageCircle size={36} strokeWidth={1.2} />
-                                        <p className="text-sm">No messages from this family yet.</p>
+                                        <MessageCircle
+                                            size={36}
+                                            strokeWidth={1.2}
+                                        />
+                                        <p className="text-sm">
+                                            No messages in this family
+                                            conversation yet.
+                                        </p>
                                     </div>
                                 ) : (
                                     familyGroups.map((group) => (
@@ -431,9 +592,19 @@ export default function Messages({
                                                     <Bubble
                                                         key={m.id}
                                                         text={m.message}
-                                                        time={formatTime(m.created_at)}
-                                                        isSelf={m.sender_type === 'admin'}
-                                                        name={m.sender_type !== 'admin' ? m.head_name : undefined}
+                                                        time={formatTime(
+                                                            m.created_at,
+                                                        )}
+                                                        isSelf={
+                                                            m.sender_type ===
+                                                            'admin'
+                                                        }
+                                                        name={
+                                                            m.sender_type !==
+                                                            'admin'
+                                                                ? m.head_name
+                                                                : undefined
+                                                        }
                                                     />
                                                 ))}
                                             </div>
@@ -443,15 +614,25 @@ export default function Messages({
                                 <div ref={familyEndRef} />
                             </div>
 
-                            <form onSubmit={submitFamily} className="flex items-end gap-2 border-t border-slate-100 bg-white px-4 py-3">
+                            <form
+                                onSubmit={submitFamily}
+                                className="flex items-end gap-2 border-t border-slate-100 bg-white px-4 py-3"
+                            >
                                 <textarea
                                     className="input-field min-h-[2.5rem] flex-1 resize-none py-2 text-sm"
                                     placeholder={`Reply to ${selectedFamily.head_name}…`}
                                     rows={1}
                                     value={form.data.message}
-                                    onChange={(e) => form.setData('message', e.target.value)}
+                                    onChange={(e) =>
+                                        form.setData('message', e.target.value)
+                                    }
                                     onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitFamily(e as unknown as FormEvent); }
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            submitFamily(
+                                                e as unknown as FormEvent,
+                                            );
+                                        }
                                     }}
                                     required
                                     maxLength={5000}

@@ -38,7 +38,13 @@ every module.
    Quantity columns show both items together. Every distribution record
    gets its own **unique, auto-generated QR code** the moment it's saved,
    viewable/downloadable per row, so a family's relief record can be
-   checked before handing out more aid.
+   checked before handing out more aid. Administrators can also create
+   location-scoped schedules; pending and in-transit schedules reserve
+   their individual stock or resource-set counts so that the same stock
+   cannot be over-allocated. Schedules can be cancelled to release those
+   reservations, or deleted if none of their distributions are completed.
+   Completing a set distribution consumes one available set; reversing a
+   newly completed set distribution restores it.
 6. **Team Management** *(admin only)* — register/update personnel accounts,
    role (Administrator/Staff), status (Active/On Leave/Inactive),
    responsibilities, assigned location.
@@ -152,6 +158,32 @@ npm run dev
 
 Administrators see all 9 modules. Staff accounts see everything except
 **Team Management** and **Settings**.
+
+### Family import credential emails
+
+Imported family rows must contain a valid, unique email address. Temporary PIN emails are tracked in a delivery ledger and sent through Laravel's queue. The import screen reports queued, sending, accepted, or failed status, and administrators can retry failed deliveries. “Accepted by mail server” does not prove that an email reached the recipient's inbox; providers may apply quotas, spam filtering, or bounces.
+
+For a no-cost starting option, Gmail accounts can use Gmail SMTP, subject to Google's account and sending limits. Enable 2-Step Verification and create an app password; do not use the normal account password. Configure the deployment's `.env` (never commit its secrets):
+
+```dotenv
+MAIL_MAILER=smtp
+MAIL_SCHEME=tls
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=your-sending-account@gmail.com
+MAIL_PASSWORD=your-google-app-password
+MAIL_FROM_ADDRESS=your-sending-account@gmail.com
+MAIL_FROM_NAME="${APP_NAME}"
+QUEUE_CONNECTION=database
+```
+
+Run the queue worker continuously so pending credential messages are processed and retried:
+
+```bash
+php artisan queue:work database --queue=default --tries=3 --backoff=60
+```
+
+On Windows, run it under a process supervisor or a scheduled task configured to restart it. Log, array, and failover mailers are rejected for credential delivery and result in failed status instead of a false success. Provider delivery/bounce callbacks are not included in this provider-neutral implementation; use provider webhooks if verified inbox-delivery status is required.
 
 ## Production build
 

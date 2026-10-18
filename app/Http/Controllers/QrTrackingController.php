@@ -43,6 +43,7 @@ class QrTrackingController extends Controller
                     'scan_date'       => $scan->scan_date?->format('Y-m-d'),
                     'scan_time'       => $scan->scan_time,
                     'receiver'        => $scan->receiver,
+                    'resource_label'  => $scan->resource_label,
 
                     'family' => $scan->family ? [
                         'id'          => $scan->family->id,
@@ -71,21 +72,34 @@ class QrTrackingController extends Controller
             });
 
         // ── Distribution history for the calendar tab ───────────────────────
+        $scheduleSetNames = DB::table('distributions as d')
+            ->join('resource_sets as rs', 'rs.id', '=', 'd.resource_set_id')
+            ->whereNotNull('d.schedule_id')
+            ->selectRaw('d.schedule_id, MIN(rs.name) as resource_name')
+            ->groupBy('d.schedule_id');
+
         $scheduleHistory = DB::table('distribution_schedules as s')
             ->leftJoin('resources as r', 'r.id', '=', 's.resource_id')
             ->leftJoin('locations as l', 'l.id', '=', 's.location_id')
+            ->leftJoinSub($scheduleSetNames, 'ss', 'ss.schedule_id', '=', 's.id')
             ->orderByDesc('s.scheduled_at')
-            ->get(['s.id', 's.scheduled_at', 'r.name as resource_name', 'l.name as location_name'])
+            ->get([
+                's.id',
+                's.scheduled_at',
+                DB::raw('COALESCE(ss.resource_name, r.name) as resource_name'),
+                'l.name as location_name',
+            ])
             ->map(function ($schedule) use ($user) {
                 $dists = DB::table('distributions as d')
                     ->join('families as f', 'f.id', '=', 'd.family_id')
                     ->leftJoin('puroks as p',     'p.id', '=', 'f.purok_id')
                     ->leftJoin('resources as r2', 'r2.id', '=', 'd.resource_id')
-                    ->leftJoin('users as u',      'u.id',  '=', 'd.distributed_by')
-                    ->leftJoin('qr_scans as q',   function ($join) {
-                        $join->on('q.family_id', '=', 'f.id')
-                              ->where('q.scan_type', 'completed');
+                    ->leftJoin('resource_sets as rs', 'rs.id', '=', 'd.resource_set_id')
+                    ->leftJoin('qr_scans as q', function ($join) {
+                        $join->on('q.distribution_id', '=', 'd.id')
+                            ->where('q.scan_type', 'completed');
                     })
+                    ->leftJoin('users as u',      'u.id',  '=', 'q.scanned_by')
                     ->where('d.schedule_id', $schedule->id)
                     ->when($user->role === 'staff', fn ($q) => $q->where('f.purok_id', $user->purok_id))
                     ->get([
@@ -93,9 +107,11 @@ class QrTrackingController extends Controller
                         'd.quantity', 'f.family_id as family_code',
                         'f.head_name', 'f.location_id',
                         'p.name as purok_name',
-                        'r2.name as resource_name', 'r2.unit as resource_unit',
+                        DB::raw('COALESCE(rs.name, r2.name) as resource_name'),
+                        DB::raw("CASE WHEN rs.id IS NULL THEN r2.unit ELSE 'set' END as resource_unit"),
                         'u.name as scanned_by',
-                        'q.receiver', 'q.scanned_at as scan_time',
+                        DB::raw('COALESCE(q.receiver, d.claimed_by) as receiver'),
+                        'q.scanned_at as scan_time',
                     ]);
 
                 return [
@@ -117,7 +133,7 @@ class QrTrackingController extends Controller
                 ->with([
                     'purok:id,name',
                     'distributions' => fn ($q) => $q
-                        ->with('resource:id,name,unit')
+                        ->with(['resource:id,name,unit', 'resourceSet:id,name'])
                         ->whereNotIn('status', ['cancelled'])
                         ->orderByDesc('distribution_date')
                         ->limit(1),
@@ -135,6 +151,10 @@ class QrTrackingController extends Controller
                             'id'   => $f->distributions->first()->resource->id,
                             'name' => $f->distributions->first()->resource->name,
                             'unit' => $f->distributions->first()->resource->unit,
+                        ] : null,
+                        'resource_set' => $f->distributions->first()->resourceSet ? [
+                            'id' => $f->distributions->first()->resourceSet->id,
+                            'name' => $f->distributions->first()->resourceSet->name,
                         ] : null,
                     ] : null,
                 ]),
@@ -160,19 +180,35 @@ class QrTrackingController extends Controller
             'receiver'        => 'nullable|string|max:255',
         ]);
 
-        // Resolve resource_id from the family's latest pending distribution
+        // Resolve the family scan to its scheduled distribution.
         $resourceId = null;
+        $dist = null;
         if (! empty($data['family_id'])) {
-            $dist = \App\Models\Distribution::where('family_id', $data['family_id'])
+            $dist = \App\Models\Distribution::with(['resource:id,name', 'resourceSet:id,name'])
+                ->where('family_id', $data['family_id'])
                 ->whereNotIn('status', ['cancelled'])
                 ->orderByDesc('distribution_date')
-                ->first(['resource_id']);
+                ->first();
+
+            if (! $dist) {
+                return back()->withErrors([
+                    'family_id' => 'No scheduled distribution was found for this family.',
+                ]);
+            }
+
+            if ($windowError = $dist->claimWindowError()) {
+                return back()->withErrors(['family_id' => $windowError]);
+            }
+
             $resourceId = $dist?->resource_id;
         }
+        $resourceLabel = $dist?->resourceSet?->name ?? $dist?->resource?->name;
 
         QrScan::create([
+            'distribution_id' => $dist?->id,
             'family_id'       => $data['family_id'] ?? null,
             'resource_id'     => $resourceId,
+            'resource_label'  => $resourceLabel,
             'location_id'     => $data['location_id'] ?? null,
             'scanned_by'      => $request->user()?->id,
             'scan_type'       => $data['scan_type'],

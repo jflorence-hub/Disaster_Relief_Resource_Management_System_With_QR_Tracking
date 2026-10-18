@@ -81,11 +81,6 @@ Route::middleware(['auth', 'must.change.password'])->group(function () {
     Route::resource('distribution', DistributionController::class)
         ->only(['index', 'store', 'update', 'destroy']);
 
-    Route::put(
-        'distribution-schedule',
-        [DistributionController::class, 'updateSchedule']
-    )->name('distribution.schedule.update');
-    
     Route::put('distribution-schedule', [DistributionController::class, 'updateSchedule'])->name('distribution.schedule.update');
 
     Route::get('qr-tracking', [QrTrackingController::class, 'index'])->name('qr-tracking.index');
@@ -120,6 +115,10 @@ Route::middleware(['auth', 'must.change.password'])->group(function () {
         // Stock check endpoint — JSON response, must be before Route::resource('distribution') wildcard
         Route::post('distribution/check-stock', [DistributionController::class, 'checkStock'])
             ->name('distribution.check-stock');
+        Route::post('distribution-schedule/{scheduleId}/cancel', [DistributionController::class, 'cancelSchedule'])
+            ->name('distribution.schedule.cancel');
+        Route::delete('distribution-schedule/{scheduleId}', [DistributionController::class, 'destroySchedule'])
+            ->name('distribution.schedule.destroy');
 
         // Distribution exclusion controls
         Route::post('distribution/{distribution}/exclude', [DistributionController::class, 'exclude'])
@@ -128,10 +127,12 @@ Route::middleware(['auth', 'must.change.password'])->group(function () {
             ->name('distribution.include');
 
         // Family import
-        Route::get('families/import', fn() => inertia('import-families'))->name('families.import.page');
+        Route::get('families/import', [FamilyImportController::class, 'index'])->name('families.import.page');
         Route::get('families/import/template', [FamilyImportController::class, 'template'])->name('families.import.template');
         Route::post('families/import/preview', [FamilyImportController::class, 'preview'])->name('families.import.preview');
         Route::post('families/import', [FamilyImportController::class, 'import'])->name('families.import');
+        Route::get('families/import/deliveries', [FamilyImportController::class, 'deliveryStatuses'])->name('families.import.deliveries');
+        Route::post('families/import/deliveries/{deliveryId}/retry', [FamilyImportController::class, 'retryDelivery'])->name('families.import.deliveries.retry');
 
         Route::get('settings', [SettingController::class, 'index'])->name('settings.index');
         Route::patch('settings/profile', [SettingController::class, 'updateProfile'])->name('settings.profile');

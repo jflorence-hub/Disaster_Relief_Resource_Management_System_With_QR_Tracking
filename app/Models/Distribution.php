@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class Distribution extends Model
 {
@@ -44,6 +46,7 @@ class Distribution extends Model
             'household_member'   => 'integer',
             'distribution_date'  => 'datetime',
             'excluded'           => 'boolean',
+            'resource_set_consumed_at' => 'datetime',
         ];
     }
 
@@ -104,11 +107,66 @@ class Distribution extends Model
         return $this->belongsTo(User::class, 'distributed_by');
     }
 
+    public function claimWindowError(): ?string
+    {
+        if ($this->status === 'cancelled') {
+            return 'This distribution was cancelled.';
+        }
+
+        $schedule = $this->schedule_id
+            ? DB::table('distribution_schedules')
+                ->where('id', $this->schedule_id)
+                ->first(['scheduled_at', 'cancelled_at'])
+            : null;
+
+        if ($schedule && $schedule->cancelled_at) {
+            return 'This distribution schedule was cancelled.';
+        }
+
+        $scheduledAt = $schedule?->scheduled_at ?? $this->distribution_date;
+        if (! $scheduledAt) {
+            return 'This distribution has no valid scheduled time.';
+        }
+
+        $startsAt = Carbon::parse($scheduledAt);
+        if (now()->lt($startsAt)) {
+            return 'This distribution is not open yet.';
+        }
+
+        if (now()->gt($startsAt->copy()->addDay())) {
+            return 'The 24-hour claim period for this distribution has ended.';
+        }
+
+        return null;
+    }
+
     // --- Stock helpers --------------------------------------------------------
 
     /** Deduct stock for this distribution. */
     public function applyStock(): void
     {
+        if ($this->resource_set_id) {
+            if ($this->resource_set_consumed_at) {
+                return;
+            }
+
+            $set = ResourceSet::query()
+                ->lockForUpdate()
+                ->findOrFail($this->resource_set_id);
+            $remaining = (int) ($set->sets_remaining ?? $set->num_sets ?? 0);
+
+            if ($remaining < 1) {
+                throw new \RuntimeException("Resource set {$set->name} is out of stock.");
+            }
+
+            $set->sets_remaining = $remaining - 1;
+            $set->save();
+            $this->resource_set_consumed_at = now();
+            $this->save();
+
+            return;
+        }
+
         if ($this->resource_id) {
             Resource::whereKey($this->resource_id)
                 ->decrement('quantity', $this->quantity);
@@ -129,6 +187,26 @@ class Distribution extends Model
     /** Restore stock for this distribution (used on reversal). */
     public function reverseStock(): void
     {
+        if ($this->resource_set_id) {
+            if (! $this->resource_set_consumed_at) {
+                return;
+            }
+
+            $set = ResourceSet::query()
+                ->lockForUpdate()
+                ->find($this->resource_set_id);
+
+            if ($set) {
+                $set->sets_remaining = (int) ($set->sets_remaining ?? $set->num_sets ?? 0) + 1;
+                $set->save();
+            }
+
+            $this->resource_set_consumed_at = null;
+            $this->save();
+
+            return;
+        }
+
         if ($this->resource_id) {
             Resource::whereKey($this->resource_id)
                 ->increment('quantity', $this->quantity);

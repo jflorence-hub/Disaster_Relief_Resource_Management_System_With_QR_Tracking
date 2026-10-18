@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Family;
+use App\Models\HouseholdMember;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -19,9 +20,18 @@ class AuthenticateFamilyApiToken
         }
 
         $family = Family::where('api_token', hash('sha256', $token))->first();
+        $member = null;
 
         if (!$family) {
-            return response()->json(['message' => 'Invalid or expired token.'], 401);
+            $member = HouseholdMember::with('family')
+                ->where('api_token', hash('sha256', $token))
+                ->first();
+
+            if (! $member || ! $member->family) {
+                return response()->json(['message' => 'Invalid or expired token.'], 401);
+            }
+
+            $family = $member->family;
         }
 
         if ($family->status !== 'active') {
@@ -29,6 +39,7 @@ class AuthenticateFamilyApiToken
         }
 
         Auth::setUser($family);
+        $request->attributes->set('authenticated_household_member', $member);
 
         return $next($request);
     }

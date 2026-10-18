@@ -68,6 +68,16 @@ class ResourceSetController extends Controller
     {
         abort_unless($request->user()?->role === 'admin', 403, 'Only administrators can manage resource sets.');
 
+        $activeDistributionCount = $resourceSet->distributions()
+            ->whereIn('status', ['pending', 'in_transit'])
+            ->count();
+
+        if ($activeDistributionCount > 0) {
+            return back()->withErrors([
+                'resource_set' => "Cannot edit this set while {$activeDistributionCount} active distribution(s) reserve it.",
+            ])->withInput();
+        }
+
         $data       = $this->validateSetRequest($request);
         $newNumSets = (int) ($data['num_sets'] ?? 1);
         $oldNumSets = (int) $resourceSet->num_sets;

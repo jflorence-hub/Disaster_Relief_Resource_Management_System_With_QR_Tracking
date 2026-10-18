@@ -65,6 +65,7 @@ export interface ResourceItem {
     sku: string;
     qr_code: string;
     quantity: number;
+    available_quantity?: number;
     unit: string;
     minimum_threshold: number;
     expiry_date: string | null;
@@ -110,6 +111,7 @@ export interface Distribution {
     distributor?: { id: number; name: string } | null;
     assignment_mode?: 'set' | 'individual' | null;
     resource_set_id?: number | null;
+    schedule_id?: number | null;
     resource_set?: ResourceSet | null;
     items?: DistributionItem[];
     excluded?: boolean;
@@ -120,6 +122,7 @@ export interface QrScan {
     id: number;
 
     resource_id?: number | null;
+    resource_label?: string | null;
     destination_resource_id?: number | null;
 
     family_id?: number | null;
@@ -172,6 +175,10 @@ export interface FamilyOption {
             name: string;
             unit: string;
         } | null;
+        resource_set?: {
+            id: number;
+            name: string;
+        } | null;
     } | null;
 }
 
@@ -222,6 +229,7 @@ export interface ResourceSet {
     created_by: number | null;
     num_sets?: number;
     sets_remaining?: number | null;
+    available_sets?: number;
     items?: ResourceSetItem[];
     location?: { id: number; name: string } | null;
 }

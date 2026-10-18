@@ -21,6 +21,7 @@ class Family extends Authenticatable
         'purok_id',
         'location_id',
         'pin',
+        'must_change_pin',
         'api_token',
         'status',
         'qr_code',
@@ -30,6 +31,13 @@ class Family extends Authenticatable
         'pin',
         'api_token',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'must_change_pin' => 'boolean',
+        ];
+    }
 
     protected static function booted(): void
     {

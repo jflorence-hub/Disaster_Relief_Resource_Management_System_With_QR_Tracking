@@ -12,9 +12,11 @@ class QrScan extends Model
 
     protected $fillable = [
         'resource_id',
+        'resource_label',
         'destination_resource_id',
 
         'family_id',
+        'distribution_id',
 
         'location_id',
         'from_location_id',
@@ -62,6 +64,11 @@ class QrScan extends Model
         return $this->belongsTo(
             Family::class
         );
+    }
+
+    public function distribution(): BelongsTo
+    {
+        return $this->belongsTo(Distribution::class);
     }
 
     public function location(): BelongsTo

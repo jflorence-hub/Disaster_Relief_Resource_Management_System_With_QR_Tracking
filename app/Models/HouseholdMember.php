@@ -11,6 +11,15 @@ class HouseholdMember extends Model
         'family_id',
         'household_member_number',
         'name',
+        'email',
+        'phone',
+        'password',
+        'api_token',
+    ];
+
+    protected $hidden = [
+        'password',
+        'api_token',
     ];
 
     /**
