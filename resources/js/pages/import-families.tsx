@@ -30,8 +30,6 @@ interface PreviewMeta {
     type?: string;
     address?: string;
     city?: string;
-    capacity?: string;
-    status?: string;
 }
 
 interface ImportError {
@@ -83,6 +81,7 @@ export default function ImportFamilies({
     const [rows, setRows] = useState<PreviewRow[]>([]);
     const [previewErrors, setPreviewErrors] = useState<ImportError[]>([]);
     const [locationExists, setLocationExists] = useState<boolean | null>(null);
+    const [locationStatus, setLocationStatus] = useState<string | null>(null);
     const [emailTransportConfigured, setEmailTransportConfigured] = useState<
         boolean | null
     >(null);
@@ -200,6 +199,7 @@ export default function ImportFamilies({
             setRows(data.rows);
             setPreviewErrors(data.errors ?? []);
             setLocationExists(data.locationExists ?? null);
+            setLocationStatus(data.locationStatus ?? null);
             setEmailTransportConfigured(data.emailTransportConfigured ?? false);
             setStage('preview');
         } catch (e) {
@@ -252,6 +252,7 @@ export default function ImportFamilies({
         setRows([]);
         setPreviewErrors([]);
         setLocationExists(null);
+        setLocationStatus(null);
         setError(null);
         if (fileRef.current) fileRef.current.value = '';
     };
@@ -452,12 +453,6 @@ export default function ImportFamilies({
                             <span>{meta.address || '—'}</span>
                             <span className="text-slate-500">City</span>{' '}
                             <span>{meta.city || '—'}</span>
-                            <span className="text-slate-500">
-                                Capacity
-                            </span>{' '}
-                            <span>{meta.capacity || '0'}</span>
-                            <span className="text-slate-500">Status</span>{' '}
-                            <span>{meta.status || 'active'}</span>
                         </div>
                         {!meta.barangay_name && (
                             <p className="mt-2 rounded bg-red-50 px-3 py-1.5 text-xs text-red-600">
@@ -465,12 +460,23 @@ export default function ImportFamilies({
                                 will fail.
                             </p>
                         )}
-                        {meta.barangay_name && locationExists === true && (
-                            <p className="mt-2 rounded bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
-                                ℹ Barangay already exists — captain info will be
-                                updated from this file.
-                            </p>
-                        )}
+                        {meta.barangay_name &&
+                            locationExists === true &&
+                            locationStatus !== 'active' && (
+                                <p className="mt-2 rounded bg-red-50 px-3 py-1.5 text-xs text-red-700">
+                                    This barangay is not active and cannot be
+                                    selected for import. Choose an active
+                                    barangay in the file or activate it first.
+                                </p>
+                            )}
+                        {meta.barangay_name &&
+                            locationExists === true &&
+                            locationStatus === 'active' && (
+                                <p className="mt-2 rounded bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+                                    ℹ Barangay already exists — captain info
+                                    will be updated from this file.
+                                </p>
+                            )}
                         {meta.barangay_name && locationExists === false && (
                             <p className="mt-2 rounded bg-blue-50 px-3 py-1.5 text-xs text-blue-700">
                                 ✓ New barangay — will be created with the
@@ -577,7 +583,12 @@ export default function ImportFamilies({
                         <button
                             className="btn-primary"
                             onClick={handleImport}
-                            disabled={busy || validRows.length === 0}
+                            disabled={
+                                busy ||
+                                validRows.length === 0 ||
+                                (locationExists === true &&
+                                    locationStatus !== 'active')
+                            }
                         >
                             {busy
                                 ? 'Importing…'

@@ -47,7 +47,7 @@ class FamilyImportController extends Controller
         $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
 
-        // Header metadata block (rows 1-8) — matches the Add Location modal
+        // Header metadata block (rows 1-7)
         $sheet->setCellValue('A1', 'Barangay Name');
         $sheet->setCellValue('B1', 'Barangay San Isidro');
         $sheet->setCellValue('A2', 'Barangay Captain Name');
@@ -62,21 +62,17 @@ class FamilyImportController extends Controller
         $sheet->setCellValue('B6', 'Barangay San Isidro, Ormoc City');
         $sheet->setCellValue('A7', 'City');
         $sheet->setCellValue('B7', 'Ormoc City');
-        $sheet->setCellValue('A8', 'Capacity');
-        $sheet->setCellValue('B8', '0');
-        $sheet->setCellValue('A9', 'Operational Status');
-        $sheet->setCellValue('B9', 'active');
 
-        // Column headers (row 11)
+        // Column headers (row 9)
         $headers = ['A' => 'head_firstname', 'B' => 'head_lastname', 'C' => 'household_members', 'D' => 'purok', 'E' => 'phone', 'F' => 'email'];
         foreach ($headers as $col => $header) {
-            $sheet->setCellValue("{$col}11", $header);
+            $sheet->setCellValue("{$col}9", $header);
         }
 
-        // Sample data row (row 12)
+        // Sample data row (row 10)
         $sample = ['A' => 'Juan', 'B' => 'Dela Cruz', 'C' => 'Maria Dela Cruz, Jose Dela Cruz', 'D' => 'Purok 1', 'E' => '09181234567', 'F' => 'family@example.com'];
         foreach ($sample as $col => $val) {
-            $sheet->setCellValue("{$col}12", $val);
+            $sheet->setCellValue("{$col}10", $val);
         }
 
         $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
@@ -106,8 +102,11 @@ class FamilyImportController extends Controller
 
         // Let the frontend know whether this barangay already exists,
         // so it can show the appropriate confirmation message.
-        $locationExists = ! empty($meta['barangay_name'])
-            && Location::whereRaw('LOWER(TRIM(name)) = ?', [strtolower(trim($meta['barangay_name']))])->exists();
+        $location = empty($meta['barangay_name'])
+            ? null
+            : Location::whereRaw('LOWER(TRIM(name)) = ?', [strtolower(trim($meta['barangay_name']))])->first(['id', 'status']);
+        $locationExists = $location !== null;
+        $locationStatus = $location?->status;
 
         $mailer = config('mail.default');
         $emailTransportConfigured = ! in_array($mailer, ['log', 'array', 'failover'], true)
@@ -118,7 +117,7 @@ class FamilyImportController extends Controller
                 && filled(config('mail.mailers.smtp.host'));
         }
 
-        return response()->json(compact('meta', 'rows', 'errors', 'locationExists', 'emailTransportConfigured'));
+        return response()->json(compact('meta', 'rows', 'errors', 'locationExists', 'locationStatus', 'emailTransportConfigured'));
     }
 
     // --- Confirm / import -----------------------------------------------------
@@ -135,7 +134,11 @@ class FamilyImportController extends Controller
             return response()->json(['message' => 'Could not parse file: ' . $e->getMessage()], 422);
         }
 
-        $location = $this->resolveLocation($meta);
+        try {
+            $location = $this->resolveLocation($meta);
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
         $imported = 0;
         $skipped  = 0;
         $errors   = $parseErrors;
@@ -223,25 +226,26 @@ class FamilyImportController extends Controller
             $data[] = $cells;
         }
 
-        // Rows 1-9 (indices 0-8): metadata - [label, value]
-        // Extended to match the Add Location modal; backward compatible with
-        // old templates that only had rows 1-4.
+        // Read metadata by label to support both current and older templates.
+        $metadata = [];
+        foreach (array_slice($data, 0, 9) as $row) {
+            $label = strtolower(trim((string) ($row[0] ?? '')));
+            if ($label !== '') {
+                $metadata[$label] = trim((string) ($row[1] ?? ''));
+            }
+        }
+
         $meta = [
-            'barangay_name'   => trim((string) ($data[0][1] ?? '')),
-            'captain_name'    => trim((string) ($data[1][1] ?? '')),
-            'captain_contact' => trim((string) ($data[2][1] ?? '')),
-            'captain_email'   => trim((string) ($data[3][1] ?? '')),
-            'type'            => trim((string) ($data[4][1] ?? '')) ?: 'distribution_center',
-            'address'         => trim((string) ($data[5][1] ?? '')),
-            'city'            => trim((string) ($data[6][1] ?? '')),
-            'capacity'        => trim((string) ($data[7][1] ?? '')),
-            'status'          => trim((string) ($data[8][1] ?? '')) ?: 'active',
+            'barangay_name'   => $metadata['barangay name'] ?? '',
+            'captain_name'    => $metadata['barangay captain name'] ?? '',
+            'captain_contact' => $metadata['barangay captain contact'] ?? '',
+            'captain_email'   => $metadata['barangay captain email'] ?? '',
+            'type'            => $metadata['location type'] ?? 'distribution_center',
+            'address'         => $metadata['address'] ?? '',
+            'city'            => $metadata['city'] ?? '',
         ];
 
-        // Find the header row dynamically: scan for 'head_firstname' in any
-        // row rather than assuming a fixed position. This supports both the
-        // old template (headers at row 6 / index 5) and the new template
-        // (headers at row 11 / index 10).
+        // Find the header row dynamically so older and current templates work.
         $headerRowIndex = null;
         foreach ($data as $idx => $row) {
             $rowLower = array_map('strtolower', array_map('trim', array_map('strval', $row)));
@@ -357,6 +361,12 @@ class FamilyImportController extends Controller
         $location = Location::whereRaw('LOWER(TRIM(name)) = ?', [strtolower(trim($name))])->first();
 
         if ($location) {
+            if ($location->status !== 'active') {
+                throw new \RuntimeException(
+                    "Barangay \"{$location->name}\" is not active. Select an active barangay before importing families."
+                );
+            }
+
             // Update all location fields from the file — do not overwrite with blank values.
             // Uses the same column names as the Add Location modal so edits are visible in the UI.
             $updates = array_filter([
@@ -371,8 +381,6 @@ class FamilyImportController extends Controller
                 'type'     => $meta['type']     ?: null,
                 'address'  => $meta['address']  ?: null,
                 'city'     => $meta['city']     ?: null,
-                'capacity' => is_numeric($meta['capacity']) ? (int) $meta['capacity'] : null,
-                'status'   => $meta['status']   ?: null,
             ], fn ($v) => $v !== null);
 
             if (! empty($updates)) {
@@ -399,17 +407,12 @@ class FamilyImportController extends Controller
         $city     = $meta['city']     ?: $name;
         $type     = in_array($meta['type'], ['warehouse', 'distribution_center', 'shelter', 'field_office'], true)
                         ? $meta['type'] : 'distribution_center';
-        $status   = in_array($meta['status'], ['active', 'inactive', 'maintenance'], true)
-                        ? $meta['status'] : 'active';
-        $capacity = is_numeric($meta['capacity']) ? (int) $meta['capacity'] : 0;
-
         $location = Location::create([
             'name'            => $name,
             'type'            => $type,
             'address'         => $address,
-            'city'            => $city,
-            'capacity'        => $capacity,
-            'status'          => $status,
+            'city'             => $city,
+            'status'          => 'active',
             // Modal columns
             'contact_person'  => $meta['captain_name'],
             'contact_phone'   => $meta['captain_contact'],

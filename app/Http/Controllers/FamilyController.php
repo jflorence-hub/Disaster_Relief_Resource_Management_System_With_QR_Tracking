@@ -8,6 +8,7 @@ use App\Models\Purok;
 use App\Models\Resource;
 use App\Models\User;
 use App\Models\Location;
+use App\Services\FamilyApprovalService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -18,11 +19,16 @@ use Inertia\Response;
 
 class FamilyController extends Controller
 {
+    public function __construct(private FamilyApprovalService $approvalService)
+    {
+    }
+
     public function index(Request $request): Response
     {
         $user = $request->user();
 
         $families = Family::query()
+            ->where('status', '!=', 'pending')
             ->with([
                 'purok:id,name',
                 'location:id,name,status',
@@ -65,6 +71,7 @@ class FamilyController extends Controller
             ->select([
                 'id',
                 'family_id',
+                'qr_code',
                 'head_name',
                 'email',
                 'phone',
@@ -74,6 +81,17 @@ class FamilyController extends Controller
                 'status',
             ])
             ->get();
+
+        $pendingFamilies = $user->role === 'admin'
+            ? Family::query()
+                ->with(['purok:id,name', 'location:id,name,status', 'household_member:id,family_id,household_member_number,name'])
+                ->where('status', 'pending')
+                ->orderBy('created_at')
+                ->get([
+                    'id', 'family_id', 'qr_code', 'head_name', 'email', 'phone',
+                    'household_member', 'purok_id', 'location_id', 'status', 'created_at',
+                ])
+            : [];
 
         $puroks = Purok::query()
             ->where('status', 'active')
@@ -108,10 +126,14 @@ class FamilyController extends Controller
                 'purok_id',
             ]);
 
-        $allLocations = Location::query()->orderBy('name')->get(['id', 'name', 'status']);
+        $allLocations = Location::query()
+            ->where('status', 'active')
+            ->orderBy('name')
+            ->get(['id', 'name', 'status']);
 
         return Inertia::render('families', [
             'families'     => $families,
+            'pendingFamilies' => $pendingFamilies,
             'userRole'     => $user->role,
             'puroks'       => $puroks,
             'locations'    => $locations,
@@ -119,6 +141,32 @@ class FamilyController extends Controller
             'staff'        => $staff,
             'filters'      => $request->only(['search', 'location_id']),
         ]);
+    }
+
+    public function approve(Family $family): RedirectResponse
+    {
+        if ($family->status !== 'pending') {
+            return back()->with('error', 'This family registration is not pending approval.');
+        }
+
+        $emailSent = $this->approvalService->approve($family);
+
+        return $emailSent
+            ? back()->with('success', 'Family registration approved and acceptance email sent.')
+            : back()->with('error', 'Family registration was approved, but the acceptance email could not be sent. Check the mail configuration and logs.');
+    }
+
+    public function reject(Family $family): RedirectResponse
+    {
+        if ($family->status !== 'pending') {
+            return back()->with('error', 'This family registration is not pending approval.');
+        }
+
+        $emailSent = $this->approvalService->reject($family);
+
+        return $emailSent
+            ? back()->with('success', 'Family registration rejected and the applicant was notified.')
+            : back()->with('error', 'Family registration was rejected, but the notification email could not be sent. Check the mail configuration and logs.');
     }
 
     public function store(Request $request): RedirectResponse

@@ -82,7 +82,7 @@ class FamilyAuthController extends Controller
             'purok_id'         => $data['purok_id'],
             'location_id'      => $data['location_id'],
             'pin'              => Hash::make($data['pin']),
-            'status'           => 'active',
+            'status'           => 'pending',
         ]);
 
         // Create HouseholdMember records with names.
@@ -94,7 +94,7 @@ class FamilyAuthController extends Controller
         }
 
         return response()->json([
-            'message' => 'Family registered successfully. Please sign in.',
+            'message' => 'Registration submitted for review. You will receive an email when your account is approved.',
             'family'  => $this->payload($family->load(['location:id,name', 'purok:id,name'])),
         ], 201);
     }

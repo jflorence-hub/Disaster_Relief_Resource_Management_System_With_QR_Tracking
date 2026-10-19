@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -47,7 +48,7 @@ class TeamController extends Controller
         return Inertia::render('team-management', [
             'members'      => $members,
             'pendingStaff' => $pendingStaff,
-            'locations'    => Location::select('id', 'name')->orderBy('name')->get(),
+            'locations'    => Location::where('status', 'active')->select('id', 'name')->orderBy('name')->get(),
             'filters'      => $request->only(['search', 'role', 'status']),
             'puroks'       => Purok::select('id', 'name', 'code', 'location_id', 'assigned_staff_id')
                 ->where('status', 'active')
@@ -73,7 +74,7 @@ class TeamController extends Controller
             'role'             => 'required|in:admin,staff',
             'phone'            => 'nullable|string|max:50',
             'status'           => 'required|in:active,on_leave,inactive',
-            'location_id'      => 'nullable|exists:locations,id',
+            'location_id'      => ['nullable', Rule::exists('locations', 'id')->where('status', 'active')],
             'purok_id'         => 'nullable|exists:puroks,id',
             'birthdate'        => [
                 'nullable',
@@ -127,7 +128,7 @@ class TeamController extends Controller
             'role'             => 'required|in:admin,staff',
             'phone'            => 'nullable|string|max:50',
             'status'           => 'required|in:active,on_leave,inactive',
-            'location_id'      => 'nullable|exists:locations,id',
+            'location_id'      => ['nullable', Rule::exists('locations', 'id')->where('status', 'active')],
             'purok_id'         => 'nullable|exists:puroks,id',
             'birthdate'        => [
                 'nullable',

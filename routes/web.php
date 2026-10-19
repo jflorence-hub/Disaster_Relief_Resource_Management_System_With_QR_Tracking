@@ -70,6 +70,8 @@ Route::middleware(['auth', 'admin', 'must.change.password'])->group(function () 
 
     Route::resource('families', FamilyController::class)
         ->only(['index', 'store', 'update', 'destroy']);
+    Route::post('families/{family}/approve', [FamilyController::class, 'approve'])->name('families.approve');
+    Route::post('families/{family}/reject', [FamilyController::class, 'reject'])->name('families.reject');
     Route::get('families/{family}/members', [FamilyController::class, 'members'])->name('families.members');
 
     Route::resource('resources', ResourceController::class)
