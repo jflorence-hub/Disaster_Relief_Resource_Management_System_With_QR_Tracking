@@ -24,6 +24,15 @@ interface MonthRow {
     household_member: number;
 }
 
+interface EventRow {
+    id: number;
+    name: string;
+    type: string;
+    distribution_count: number;
+    total_quantity: number;
+    household_member: number;
+}
+
 interface LocationRow {
     id: number;
     name: string;
@@ -50,6 +59,7 @@ export default function Reports({
     summary,
     resourcesByCategory,
     distributionsByMonth,
+    distributionsByEvent,
     resourcesByLocation,
     lowStock,
     scansByType,
@@ -57,6 +67,7 @@ export default function Reports({
     summary: Summary;
     resourcesByCategory: CategoryRow[];
     distributionsByMonth: MonthRow[];
+    distributionsByEvent: EventRow[];
     resourcesByLocation: LocationRow[];
     lowStock: LowStockRow[];
     scansByType: ScanTypeRow[];
@@ -142,6 +153,30 @@ export default function Reports({
                                 </li>
                             ))}
                         </ul>
+                    )}
+                </div>
+
+                <div className="card">
+                    <h2 className="mb-4 font-semibold text-slate-800">Completed Relief by Disaster Event</h2>
+                    {distributionsByEvent.length === 0 ? (
+                        <p className="py-6 text-center text-sm text-slate-400">No event-linked distributions yet.</p>
+                    ) : (
+                        <div className="space-y-3">
+                            {distributionsByEvent.map((event) => (
+                                <div key={event.id} className="rounded-lg border border-slate-100 p-3">
+                                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                        <div>
+                                            <p className="font-medium text-slate-800">{event.name}</p>
+                                            <p className="text-xs text-slate-500">{event.type}</p>
+                                        </div>
+                                        <span className="text-xs text-slate-500">{event.distribution_count} distributions</span>
+                                    </div>
+                                    <p className="mt-2 text-sm text-slate-600">
+                                        {event.total_quantity.toLocaleString()} units · {event.household_member.toLocaleString()} household members
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
                     )}
                 </div>
             </div>

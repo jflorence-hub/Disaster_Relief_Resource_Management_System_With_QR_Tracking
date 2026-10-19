@@ -20,6 +20,13 @@ class ProfileController extends Controller
             'name'  => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email,' . $user->id],
             'phone' => ['nullable', 'regex:/^09[0-9]{9}$/'],
+            'birthdate' => [
+                'sometimes',
+                'required',
+                'date',
+                'before_or_equal:' . now()->subYears(18)->toDateString(),
+            ],
+            'home_address' => ['sometimes', 'nullable', 'string', 'max:500'],
         ]);
 
         $user->fill($data)->save();
@@ -76,6 +83,8 @@ class ProfileController extends Controller
             'avatar_url'  => $user->avatar
                 ? Storage::disk('public')->url($user->avatar)
                 : null,
+            'birthdate'   => $user->birthdate?->toDateString(),
+            'home_address' => $user->home_address,
             'location_id' => $user->location_id,
             'purok_id'    => $user->purok_id,
             'location'    => $user->location

@@ -94,6 +94,7 @@ class QrScan extends Model
         );
     }
 
+    /** @return BelongsTo<User, $this> */
     public function scanner(): BelongsTo
     {
         return $this->belongsTo(

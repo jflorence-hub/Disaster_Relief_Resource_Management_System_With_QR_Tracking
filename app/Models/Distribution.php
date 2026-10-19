@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -30,7 +31,6 @@ class Distribution extends Model
         'status',
         'notes',
         'reason',
-        'disaster',
         'family_id',
         'schedule_id',
         'claimed_by',
@@ -107,6 +107,17 @@ class Distribution extends Model
         return $this->belongsTo(User::class, 'distributed_by');
     }
 
+    public function schedule(): BelongsTo
+    {
+        return $this->belongsTo(DistributionSchedule::class, 'schedule_id');
+    }
+
+    /** @return HasOne<QrScan, $this> */
+    public function latestQrScan(): HasOne
+    {
+        return $this->hasOne(QrScan::class)->latestOfMany();
+    }
+
     public function claimWindowError(): ?string
     {
         if ($this->status === 'cancelled') {
@@ -135,6 +146,27 @@ class Distribution extends Model
 
         if (now()->gt($startsAt->copy()->addDay())) {
             return 'The 24-hour claim period for this distribution has ended.';
+        }
+
+        return null;
+    }
+
+    public function staffScanWindowError(): ?string
+    {
+        if ($this->status === 'cancelled' || ! $this->schedule_id) {
+            return 'No active distribution schedule is available for today.';
+        }
+
+        $schedule = DB::table('distribution_schedules')
+            ->where('id', $this->schedule_id)
+            ->first(['scheduled_at', 'cancelled_at']);
+
+        if (! $schedule || $schedule->cancelled_at) {
+            return 'No active distribution schedule is available for today.';
+        }
+
+        if (! Carbon::parse($schedule->scheduled_at)->isToday()) {
+            return 'Staff scanning is only available on the scheduled distribution date.';
         }
 
         return null;

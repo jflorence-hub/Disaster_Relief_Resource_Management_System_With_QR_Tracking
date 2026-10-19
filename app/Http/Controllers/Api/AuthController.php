@@ -13,7 +13,9 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 
 class AuthController extends Controller
 {
@@ -75,15 +77,23 @@ class AuthController extends Controller
             'new_password'          => 'required|string|min:8|confirmed',
         ]);
 
-        $user = User::where('email', $data['email'])->first();
+        $user = User::where('email', $data['email'])
+            ->where('role', 'staff')
+            ->first();
 
         if (! $user) {
             return response()->json(['message' => 'No account found with that email address.'], 404);
         }
 
+        if (! Cache::pull('staff_password_recovery_verified:'.$user->id)) {
+            return response()->json(['message' => 'Verify the OTP before changing the password.'], 403);
+        }
+
         $user->forceFill([
             'password' => $data['new_password'],
             'must_change_password' => false,
+            'reset_code_hash' => null,
+            'reset_code_expires_at' => null,
         ])->save();
 
         return response()->json(['message' => 'Password reset successfully. Please log in with your new password.']);
@@ -99,18 +109,13 @@ class AuthController extends Controller
             'preferred_purok_ids' => 'nullable|array',
             'preferred_purok_ids.*' => 'integer|exists:puroks,id',
             'location_id'         => 'required|exists:locations,id',
-            // Complexity: min 8, at least one uppercase, one digit, one special char
-            'password'    => [
+            'birthdate'           => [
                 'required',
-                'string',
-                'min:8',
-                'confirmed',
-                'regex:/[A-Z]/',
-                'regex:/[0-9]/',
-                'regex:/[@$!%*#?&^()_\-+=\[\]{};:\'",.<>\\/|`~]/',
+                'date',
+                'before_or_equal:' . now()->subYears(18)->toDateString(),
             ],
-        ], [
-            'password.regex' => 'Password must contain at least one uppercase letter, one number, and one special character.',
+            'home_address'        => 'nullable|string|max:500',
+            'password'            => 'required|string|min:8|confirmed',
         ]);
 
         // Server-side: location must be active (prevents race with admin deactivating a location)
@@ -122,6 +127,29 @@ class AuthController extends Controller
             ], 422);
         }
 
+        $requestedPurokIds = array_values(array_unique(array_filter(array_merge(
+            [$validated['purok_id'] ?? null],
+            $validated['preferred_purok_ids'] ?? [],
+        ))));
+        if ($requestedPurokIds !== []) {
+            $validPurokCount = Purok::query()
+                ->whereIn('id', $requestedPurokIds)
+                ->where('location_id', $location->id)
+                ->where('status', 'active')
+                ->whereIn('name', array_map(fn ($number) => "Purok {$number}", range(1, 7)))
+                ->count();
+
+            if ($validPurokCount !== count($requestedPurokIds)) {
+                return response()->json([
+                    'message' => 'All selected Puroks must belong to the selected barangay.',
+                    'errors' => [
+                        'purok_id' => ['Select Puroks 1-7 from the selected barangay only.'],
+                        'preferred_purok_ids' => ['Select Puroks 1-7 from the selected barangay only.'],
+                    ],
+                ], 422);
+            }
+        }
+
         // purok_id is now optional at registration — the admin assigns it at approval time.
         // preferred_purok_ids stores the applicant's preferences (or null = no preference).
 
@@ -131,6 +159,8 @@ class AuthController extends Controller
             'name'                => $validated['name'],
             'email'               => $validated['email'],
             'phone'               => $validated['phone'] ?? null,
+            'birthdate'           => $validated['birthdate'],
+            'home_address'        => $validated['home_address'] ?? null,
             'password'            => $tempPassword,
             'purok_id'            => null,  // assigned at approval time
             'preferred_purok_ids' => $validated['preferred_purok_ids'] ?? null,
@@ -151,7 +181,9 @@ class AuthController extends Controller
     {
         $request->validate(['email' => 'required|email']);
 
-        $user = User::where('email', $request->email)->first();
+        $user = User::where('email', $request->email)
+            ->where('role', 'staff')
+            ->first();
 
         if (! $user) {
             // Return success even if user not found to avoid enumeration
@@ -165,13 +197,25 @@ class AuthController extends Controller
             'reset_code_hash'       => Hash::make($otp),
             'reset_code_expires_at' => $expiry,
         ])->save();
+        Cache::forget('staff_password_recovery_verified:'.$user->id);
 
         try {
             Mail::raw("Your OTP for password reset is: {$otp}\n\nThis code expires in 10 minutes.", function ($message) use ($user) {
                 $message->to($user->email)->subject('Password Reset OTP');
             });
-        } catch (\Exception $e) {
-            Log::error("Failed to send OTP email to {$user->email}: {$e->getMessage()}");
+        } catch (TransportExceptionInterface $e) {
+            $user->forceFill([
+                'reset_code_hash' => null,
+                'reset_code_expires_at' => null,
+            ])->save();
+            Log::error('Staff password recovery email could not be sent.', [
+                'user_id' => $user->id,
+                'exception' => $e,
+            ]);
+
+            return response()->json([
+                'message' => 'The recovery email could not be sent. Try again later.',
+            ], 503);
         }
 
         return response()->json(['message' => 'If that email is registered, an OTP has been sent.']);
@@ -184,7 +228,9 @@ class AuthController extends Controller
             'otp'   => 'required|digits:6',
         ]);
 
-        $user = User::where('email', $request->email)->first();
+        $user = User::where('email', $request->email)
+            ->where('role', 'staff')
+            ->first();
 
         if (! $user || ! $user->reset_code_hash || ! $user->reset_code_expires_at) {
             return response()->json(['message' => 'Invalid or expired OTP.'], 422);
@@ -198,7 +244,12 @@ class AuthController extends Controller
             return response()->json(['message' => 'Invalid or expired OTP.'], 422);
         }
 
-        // Invalidate the OTP after successful verification
+        Cache::put(
+            'staff_password_recovery_verified:'.$user->id,
+            true,
+            now()->addMinutes(10)
+        );
+
         $user->forceFill([
             'reset_code_hash'       => null,
             'reset_code_expires_at' => null,
@@ -219,6 +270,9 @@ class AuthController extends Controller
             'role'                 => $user->role,
             'status'               => $user->status,
             'must_change_password' => (bool) $user->must_change_password,
+            'birthdate'            => $user->birthdate?->toDateString(),
+            'home_address'         => $user->home_address,
+            'phone'                => $user->phone,
             'location_id'          => $user->location_id,
             'purok_id'             => $user->purok_id,
             'location'             => $user->location ? ['id' => $user->location->id, 'name' => $user->location->name] : null,

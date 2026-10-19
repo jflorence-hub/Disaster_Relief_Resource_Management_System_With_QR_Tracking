@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\Distribution;
+use App\Models\DisasterEvent;
 use App\Models\Family;
 use App\Models\Location;
 use App\Models\Resource;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -43,16 +45,28 @@ class DistributionController extends Controller
         $schedules = DB::table('distribution_schedules as s')
             ->leftJoin('resources as r', 'r.id', '=', 's.resource_id')
             ->leftJoin('locations as l', 'l.id', '=', 's.location_id')
+            ->leftJoin('disaster_events as de', 'de.id', '=', 's.disaster_event_id')
             ->leftJoinSub($scheduleSetNames, 'ss', 'ss.schedule_id', '=', 's.id')
             ->orderByDesc('s.id')
             ->get([
                 's.id',
                 's.scheduled_at',
                 's.location_id',
+                's.disaster_event_id',
                 's.cancelled_at',
                 DB::raw('COALESCE(ss.resource_name, r.name) as resource_name'),
                 'l.name as location_name',
+                'de.name as disaster_event_name',
             ]);
+
+        $scheduleFamilyLocations = DB::table('distributions as d')
+            ->join('families as f', 'f.id', '=', 'd.family_id')
+            ->whereNotNull('d.schedule_id')
+            ->whereNotNull('f.location_id')
+            ->distinct()
+            ->get(['d.schedule_id', 'f.location_id'])
+            ->groupBy('schedule_id')
+            ->map(fn ($rows) => $rows->pluck('location_id')->map(fn ($id) => (int) $id)->values());
 
         $scheduleCounts = DB::table('distributions')
             ->whereNotNull('schedule_id')
@@ -124,7 +138,8 @@ class DistributionController extends Controller
          */
         $distributions = Distribution::query()
             ->with([
-                'family:id,family_id,head_name,phone,household_member,purok_id',
+                'family:id,family_id,head_name,phone,household_member,purok_id,status,location_id',
+                'family.purok:id,name',
                 'resource:id,name,unit,category',
                 'resourceSet:id,name',
                 'additionalResource:id,name,unit,category',
@@ -279,13 +294,13 @@ class DistributionController extends Controller
          */
         $staff = User::query()
             ->where('role', 'staff')
-            ->with('purok:id,name')
+            ->with('purok:id,name,location_id')
             ->when(
                 $user->role === 'staff',
                 fn ($query) => $query->whereKey($user->id)
             )
             ->orderBy('name')
-            ->get(['id', 'name', 'purok_id']);
+            ->get(['id', 'name', 'location_id', 'purok_id']);
 
         return Inertia::render('distribution', [
             'distributions' => $distributions,
@@ -306,6 +321,9 @@ class DistributionController extends Controller
             ),
             'defaultSetResource' => null,
             'scheduleFamilyNeeds' => $scheduleFamilyNeeds,
+            'disasterEvents' => DisasterEvent::query()
+                ->orderByDesc('starts_on')
+                ->get(['id', 'name', 'type', 'affected_area', 'starts_on', 'status']),
             'resourceSets' => \App\Models\ResourceSet::query()
                 ->with(['items.resource:id,name,unit', 'location:id,name'])
                 ->orderBy('name')
@@ -319,7 +337,7 @@ class DistributionController extends Controller
                         ),
                     ]);
                 }),
-            'schedules' => $schedules->map(function ($s) use ($scheduleCounts) {
+            'schedules' => $schedules->map(function ($s) use ($scheduleCounts, $scheduleFamilyLocations) {
                 $counts = $scheduleCounts[$s->id] ?? null;
                 return [
                     'id'            => $s->id,
@@ -327,6 +345,9 @@ class DistributionController extends Controller
                     'resource_name' => $s->resource_name,
                     'location_name' => $s->location_name,
                     'location_id'   => $s->location_id,
+                    'disaster_event_id' => $s->disaster_event_id,
+                    'disaster_event_name' => $s->disaster_event_name,
+                    'family_location_ids' => $scheduleFamilyLocations[$s->id] ?? [],
                     'active_count' => (int) ($counts?->active_count ?? 0),
                     'completed_count' => (int) ($counts?->completed_count ?? 0),
                     'cancelled_count' => (int) ($counts?->cancelled_count ?? 0),
@@ -385,7 +406,6 @@ class DistributionController extends Controller
                 'status'              => $data['status'],
                 'notes'               => $data['notes'] ?? null,
                 'reason'              => $data['reason'] ?? null,
-                'disaster'            => $data['disaster'] ?? null,
             ]);
 
             if (($data['assignment_mode'] ?? null) === 'individual' && !empty($data['items'])) {
@@ -452,13 +472,13 @@ class DistributionController extends Controller
                 'required_with:additional_resource_id',
             ],
             'location_id' => ['nullable', 'exists:locations,id'],
+            'distribution_date' => ['required', 'date'],
             'status' => [
                 'required',
                 'in:pending,in_transit,completed,cancelled',
             ],
             'notes'    => ['nullable', 'string'],
             'reason'   => ['nullable', 'string'],
-            'disaster' => ['nullable', 'string', 'in:Typhoon,Flood,Earthquake,Fire,Drought,Landslide,Volcanic Eruption,Other'],
             'assignment_mode'     => ['nullable', 'in:set,individual'],
             'resource_set_id'     => ['nullable', 'exists:resource_sets,id'],
             'items'               => ['nullable', 'array'],
@@ -495,13 +515,10 @@ class DistributionController extends Controller
                 ? (int) ($data['additional_quantity'] ?? 1)
                 : null;
             $dist->location_id = $data['location_id'] ?? null;
-            $dist->distribution_date = DB::table('distribution_schedules')
-                ->orderByDesc('id')
-                ->value('scheduled_at') ?? now();
+            $dist->distribution_date = $data['distribution_date'];
             $dist->status = $data['status'];
             $dist->notes = $data['notes'] ?? null;
             $dist->reason = $data['reason'] ?? null;
-            $dist->disaster = $data['disaster'] ?? null;
 
             // Assignment mode handling
             $mode = $data['assignment_mode'] ?? null;
@@ -596,7 +613,8 @@ class DistributionController extends Controller
         );
 
         $data = $request->validate([
-            'scheduled_at'        => ['required', 'date'],
+            'scheduled_at'        => ['required', 'date', 'after_or_equal:today'],
+            'disaster_event_id'   => ['nullable', 'exists:disaster_events,id,status,active'],
             'resource_id'         => ['required', 'exists:resources,id'],
             'location_id'         => ['nullable', 'exists:locations,id'],
             'assignment_mode'     => ['required', 'in:set,individual'],
@@ -683,6 +701,7 @@ class DistributionController extends Controller
 
             $scheduleId = DB::table('distribution_schedules')->insertGetId([
                 'scheduled_at' => $scheduledAt,
+                'disaster_event_id' => $data['disaster_event_id'] ?? null,
                 'resource_id'  => $data['resource_id'],
                 'location_id'  => $data['location_id'] ?? null,
                 'set_by'       => $request->user()->id,
@@ -732,6 +751,83 @@ class DistributionController extends Controller
                 'success',
                 'New relief distribution schedule added for all registered families.'
             );
+    }
+
+    public function showSchedule(Request $request, int $scheduleId): JsonResponse
+    {
+        abort_unless(
+            $request->user()?->role === 'admin',
+            403,
+            'Only administrators can view full distribution schedules.'
+        );
+
+        abort_unless(
+            DB::table('distribution_schedules')->where('id', $scheduleId)->exists(),
+            404
+        );
+
+        $distributions = Distribution::query()
+            ->with([
+                'family:id,family_id,head_name,phone,household_member,purok_id,status,location_id',
+                'family.purok:id,name',
+                'resource:id,name,unit,category',
+                'resourceSet:id,name',
+                'additionalResource:id,name,unit,category',
+                'location:id,name',
+                'items.resource:id,name,unit',
+                'latestQrScan.scanner:id,name',
+            ])
+            ->where('schedule_id', $scheduleId)
+            ->orderBy('id')
+            ->get()
+            ->map(function (Distribution $distribution) {
+                return array_merge($distribution->toArray(), [
+                    'receiver' => $distribution->latestQrScan?->receiver
+                        ?? $distribution->claimed_by,
+                    'scanned_by' => $distribution->latestQrScan?->scanner?->name,
+                ]);
+            });
+
+        return response()->json(['distributions' => $distributions]);
+    }
+
+    public function editSchedule(Request $request, int $scheduleId): RedirectResponse
+    {
+        abort_unless(
+            $request->user()?->role === 'admin',
+            403,
+            'Only administrators can edit distribution schedules.'
+        );
+
+        $data = $request->validate([
+            'scheduled_at' => ['required', 'date', 'after_or_equal:today'],
+            'disaster_event_id' => ['nullable', 'exists:disaster_events,id'],
+        ]);
+
+        DB::transaction(function () use ($data, $scheduleId) {
+            $schedule = DB::table('distribution_schedules')
+                ->where('id', $scheduleId)
+                ->lockForUpdate()
+                ->first();
+
+            abort_unless($schedule, 404);
+
+            $scheduledAt = date('Y-m-d H:i:s', strtotime($data['scheduled_at']));
+
+            DB::table('distribution_schedules')
+                ->where('id', $scheduleId)
+                ->update([
+                    'scheduled_at' => $scheduledAt,
+                    'disaster_event_id' => $data['disaster_event_id'] ?? null,
+                    'updated_at' => now(),
+                ]);
+
+            Distribution::query()
+                ->where('schedule_id', $scheduleId)
+                ->update(['distribution_date' => $scheduledAt]);
+        });
+
+        return back()->with('success', 'Distribution schedule updated successfully.');
     }
 
     public function cancelSchedule(Request $request, int $scheduleId): RedirectResponse
@@ -892,7 +988,6 @@ class DistributionController extends Controller
             ],
             'notes'    => ['nullable', 'string'],
             'reason'   => ['nullable', 'string'],
-            'disaster' => ['nullable', 'string', 'in:Typhoon,Flood,Earthquake,Fire,Drought,Landslide,Volcanic Eruption,Other'],
             'assignment_mode'     => ['nullable', 'in:set,individual'],
             'resource_set_id'     => ['nullable', 'exists:resource_sets,id'],
             'items'               => ['nullable', 'array'],

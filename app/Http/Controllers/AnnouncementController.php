@@ -48,4 +48,11 @@ class AnnouncementController extends Controller
 
         return redirect()->back()->with('success', 'Announcement sent successfully.');
     }
+
+    public function destroy(Announcement $announcement): RedirectResponse
+    {
+        $announcement->delete();
+
+        return redirect()->back()->with('success', 'Announcement deleted successfully.');
+    }
 }

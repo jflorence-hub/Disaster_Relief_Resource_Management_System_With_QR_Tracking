@@ -85,10 +85,10 @@ class QrTrackingController extends Controller
                 ], 422);
             }
 
-            if ($windowError = $distribution->claimWindowError()) {
+            if ($windowError = $distribution->staffScanWindowError()) {
                 return response()->json([
                     'message' => $windowError,
-                    'distribution_not_open' => true,
+                    'no_active_schedule' => true,
                 ], 403);
             }
 
@@ -118,7 +118,7 @@ class QrTrackingController extends Controller
      * Handle scan_type = 'completed' for a known family.
      * Atomically marks the distribution completed and deducts stock.
      *
-     * Only permits scans during the distribution's scheduled claim window.
+     * Only permits scans on the active schedule's calendar day.
      */
     private function handleCompletionScan(
         array $validated,
@@ -179,12 +179,12 @@ class QrTrackingController extends Controller
             $lockedDistribution = Distribution::query()
                 ->lockForUpdate()
                 ->findOrFail($distribution->id);
-            $windowError = $lockedDistribution->claimWindowError();
+            $windowError = $lockedDistribution->staffScanWindowError();
             abort_if($windowError !== null, 403, $windowError);
             abort_if($lockedDistribution->excluded, 403, 'This family is excluded from this distribution schedule.');
             abort_if($lockedDistribution->status === 'completed', 409, 'This family has already received their relief goods for this distribution schedule.');
 
-            if ($lockedDistribution->status === 'pending') {
+            if (in_array($lockedDistribution->status, ['pending', 'in_transit'], true)) {
                 $lockedDistribution->status     = 'completed';
                 $lockedDistribution->claimed_by = $validated['receiver'] ?? null;
                 $lockedDistribution->save();
@@ -262,9 +262,15 @@ class QrTrackingController extends Controller
         if (! $distribution && ! empty($validated['family_id'])) {
             $distribution = Distribution::with(['family', 'resource', 'resourceSet'])
                 ->where('family_id', $validated['family_id'])
+                ->whereIn('schedule_id', DB::table('distribution_schedules')
+                    ->select('id')
+                    ->whereDate('scheduled_at', today())
+                    ->whereNull('cancelled_at'))
                 ->whereNotIn('status', ['cancelled'])
-                ->orderByDesc('distribution_date')
-                ->orderByDesc('id')
+                ->orderByRaw("CASE WHEN status IN ('pending', 'in_transit') THEN 0 ELSE 1 END")
+                ->orderBy('excluded')
+                ->orderBy('distribution_date')
+                ->orderBy('id')
                 ->first();
         }
 

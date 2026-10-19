@@ -27,13 +27,21 @@ class DistributionController extends Controller
             'resourceSet:id,name',
             'additionalResource:id,name,unit',
             'location:id,name',
+            'schedule.disasterEvent:id,name,type,affected_area',
             'family:id,family_id,head_name,phone,household_member,purok_id,location_id,qr_code',
             'family.purok:id,name',
             'family.location:id,name',
         ])->where('qr_code', $qr)->first();
 
+        if ($distribution && ($scanError = $distribution->staffScanWindowError())) {
+            return response()->json([
+                'message' => $scanError,
+                'no_active_schedule' => true,
+            ], 403);
+        }
+
         if (! $distribution) {
-            // Try family QR code (FAM-QR-XXXXXXXXXX) — return the family's latest pending distribution
+            // A family QR selects the next active distribution scheduled for today.
             $family = Family::where('qr_code', $qr)
                 ->orWhere('family_id', $qr)
                 ->first();
@@ -44,15 +52,27 @@ class DistributionController extends Controller
                     'resourceSet:id,name',
                     'additionalResource:id,name,unit',
                     'location:id,name',
+                    'schedule.disasterEvent:id,name,type,affected_area',
                 ])
                 ->where('family_id', $family->id)
+                ->whereIn('schedule_id', DB::table('distribution_schedules')
+                    ->select('id')
+                    ->whereDate('scheduled_at', today())
+                    ->whereNull('cancelled_at'))
                 ->whereNotIn('status', ['cancelled'])
-                ->orderByDesc('distribution_date')
-                ->orderByDesc('id')
+                ->orderByRaw("CASE WHEN status IN ('pending', 'in_transit') THEN 0 ELSE 1 END")
+                ->orderBy('excluded')
+                ->orderBy('distribution_date')
+                ->orderBy('id')
                 ->first();
 
                 if ($distribution) {
                     $distribution->setRelation('family', $family->load(['purok:id,name', 'location:id,name']));
+                } else {
+                    return response()->json([
+                        'message' => 'No active distribution schedule is available for this family today.',
+                        'no_active_schedule' => true,
+                    ], 403);
                 }
             }
         }
@@ -86,12 +106,22 @@ class DistributionController extends Controller
             'family:id,family_id,head_name,purok_id',
             'family.purok:id,name',
             'distributor:id,name',
+            'latestQrScan.scanner:id,name',
+            'schedule.disasterEvent:id,name,type,affected_area',
         ])
             // Scope to families in this staff member's assigned purok
             ->whereHas('family', fn ($q) => $q->where('purok_id', $staff->purok_id))
             ->orderByDesc('distribution_date')
             // excluded and exclusion_reason are included in all columns
             ->get();
+
+        $distributions->each(function (Distribution $distribution) {
+            $distribution->setAttribute(
+                'scanned_by',
+                $distribution->latestQrScan?->scanner?->name
+            );
+            $distribution->unsetRelation('latestQrScan');
+        });
 
         // Build schedule groups for the dropdown
         $schedules = $distributions->map(fn ($d) => [

@@ -23,6 +23,7 @@ class FamilyDistributionController extends Controller
             'additionalResource:id,name,unit',
             'location:id,name',
             'distributor:id,name',
+            'schedule.disasterEvent:id,name,type,affected_area',
         ])
             ->where('family_id', $family->id)
             ->orderByDesc('distribution_date')
@@ -42,6 +43,9 @@ class FamilyDistributionController extends Controller
                 ->where('scan_type', 'completed')
                 ->orderByDesc('scanned_at')
                 ->first(['receiver', 'scanned_by', 'scanned_at']);
+
+            $d->setAttribute('receiver', null);
+            $d->setAttribute('scanned_by', null);
 
             if ($scan) {
                 $d->setAttribute('receiver', $scan->receiver);

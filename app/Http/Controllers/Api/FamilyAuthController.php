@@ -10,10 +10,12 @@ use App\Models\Purok;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 
 class FamilyAuthController extends Controller
 {
@@ -295,9 +297,24 @@ class FamilyAuthController extends Controller
             'reset_code_hash' => Hash::make($code),
             'reset_code_expires_at' => Carbon::now()->addMinutes(10),
         ])->save();
-        Mail::raw("Your Barangay Household Portal PIN reset code is: {$code}\nThis code expires in 10 minutes. If you did not request this, ignore this email.", function ($message) use ($family) {
-            $message->to($family->email)->subject('Family PIN reset code');
-        });
+        try {
+            Mail::raw("Your Barangay Household Portal PIN reset code is: {$code}\nThis code expires in 10 minutes. If you did not request this, ignore this email.", function ($message) use ($family) {
+                $message->to($family->email)->subject('Family PIN reset code');
+            });
+        } catch (TransportExceptionInterface $e) {
+            $family->forceFill([
+                'reset_code_hash' => null,
+                'reset_code_expires_at' => null,
+            ])->save();
+            Log::error('Family PIN recovery email could not be sent.', [
+                'family_id' => $family->id,
+                'exception' => $e,
+            ]);
+
+            return response()->json([
+                'message' => 'The recovery email could not be sent. Try again later.',
+            ], 503);
+        }
         return response()->json(['message' => 'If this email belongs to an active family account, a reset code has been sent.']);
     }
 

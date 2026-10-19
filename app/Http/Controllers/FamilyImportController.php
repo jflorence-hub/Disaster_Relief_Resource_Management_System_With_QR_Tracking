@@ -290,12 +290,16 @@ class FamilyImportController extends Controller
             $membersRaw = isset($colMap['household_members']) ? $get('household_members') : '';
             $phone      = isset($colMap['phone']) ? $get('phone') : '';
             $email      = isset($colMap['email']) ? strtolower($get('email')) : '';
+            $purokMatches = [];
+            $validPurok = preg_match('/^purok\s*([1-7])$/i', $purokName, $purokMatches) === 1;
 
             $rowError = null;
             if (empty($headFirst) || empty($headLast)) {
                 $rowError = 'Missing head_firstname or head_lastname.';
             } elseif (empty($purokName)) {
                 $rowError = 'Missing purok.';
+            } elseif (! $validPurok) {
+                $rowError = 'Purok must be numbered 1 through 7.';
             } elseif (empty($email)) {
                 $rowError = 'Missing email — email is required because the temporary PIN is sent by email.';
             } elseif (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -307,6 +311,9 @@ class FamilyImportController extends Controller
             }
             if ($email !== '' && ! $rowError) {
                 $seenEmails[strtolower($email)] = true;
+            }
+            if ($validPurok) {
+                $purokName = "Purok {$purokMatches[1]}";
             }
 
             $memberNames = [];
@@ -418,18 +425,13 @@ class FamilyImportController extends Controller
 
     private function importRow(array $row, Location $location): array
     {
-        $purok = Purok::whereRaw('LOWER(TRIM(name)) = ?', [strtolower($row['purok_name'])])
+        $purok = Purok::where('name', $row['purok_name'])
             ->where('location_id', $location->id)
+            ->where('status', 'active')
             ->first();
 
-        // Auto-create the purok under this location if it does not exist yet.
-        // This ensures imported puroks are always scoped to the correct barangay.
         if (! $purok) {
-            $purok = Purok::create([
-                'name'        => $row['purok_name'],
-                'location_id' => $location->id,
-                'status'      => 'active',
-            ]);
+            throw new \RuntimeException("{$row['purok_name']} is not configured for {$location->name}.");
         }
 
         $headName  = $row['head_name'];

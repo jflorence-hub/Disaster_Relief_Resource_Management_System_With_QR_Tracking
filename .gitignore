@@ -26,3 +26,7 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+# Built APKs (use build-apks.ps1 to generate)
+/public/apk/
+

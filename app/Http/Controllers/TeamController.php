@@ -8,9 +8,11 @@ use App\Models\User;
 use App\Services\StaffApprovalService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -40,7 +42,7 @@ class TeamController extends Controller
             ->where('role', 'staff')
             ->with(['purok:id,name', 'location:id,name'])
             ->orderBy('created_at')
-            ->get(['id', 'name', 'email', 'phone', 'purok_id', 'preferred_purok_ids', 'location_id', 'created_at']);
+            ->get(['id', 'name', 'email', 'phone', 'purok_id', 'preferred_purok_ids', 'location_id', 'birthdate', 'home_address', 'created_at']);
 
         return Inertia::render('team-management', [
             'members'      => $members,
@@ -49,6 +51,8 @@ class TeamController extends Controller
             'filters'      => $request->only(['search', 'role', 'status']),
             'puroks'       => Purok::select('id', 'name', 'code', 'location_id', 'assigned_staff_id')
                 ->where('status', 'active')
+                ->whereNotNull('location_id')
+                ->whereIn('name', array_map(fn ($number) => "Purok {$number}", range(1, 7)))
                 ->orderBy('name')
                 ->get(),
         ]);
@@ -70,23 +74,15 @@ class TeamController extends Controller
             'phone'            => 'nullable|string|max:50',
             'status'           => 'required|in:active,on_leave,inactive',
             'location_id'      => 'nullable|exists:locations,id',
-            'responsibilities' => 'nullable|string|max:255',
             'purok_id'         => 'nullable|exists:puroks,id',
-            'birthdate'        => 'nullable|date',
+            'birthdate'        => [
+                'nullable',
+                'required_if:role,staff',
+                'date',
+                'before_or_equal:' . now()->subYears(18)->toDateString(),
+            ],
             'home_address'     => 'nullable|string|max:500',
         ]);
-
-        // Ensure the chosen purok belongs to the chosen location (prevents cross-barangay assignment)
-        if (! empty($data['purok_id']) && ! empty($data['location_id'])) {
-            $purokBelongs = Purok::where('id', $data['purok_id'])
-                ->where('location_id', $data['location_id'])
-                ->exists();
-            if (! $purokBelongs) {
-                return back()->withErrors([
-                    'purok_id' => 'The selected purok does not belong to the chosen location.',
-                ])->withInput();
-            }
-        }
 
         $plainPassword    = $data['password'];
         $data['password'] = Hash::make($data['password']);
@@ -97,13 +93,16 @@ class TeamController extends Controller
             $data['must_change_password'] = true;
         }
 
-        $user = User::create($data);
+        $user = DB::transaction(function () use ($data) {
+            $purok = $this->validatePurokAssignment($data);
+            $user = User::create($data);
 
-        // Assign this user to the chosen purok
-        if (! empty($data['purok_id'])) {
-            Purok::where('id', $data['purok_id'])
-                ->update(['assigned_staff_id' => $user->id]);
-        }
+            if ($purok) {
+                $purok->update(['assigned_staff_id' => $user->id]);
+            }
+
+            return $user;
+        });
 
         // Send welcome e-mail for staff accounts
         if ($user->role === 'staff') {
@@ -129,26 +128,15 @@ class TeamController extends Controller
             'phone'            => 'nullable|string|max:50',
             'status'           => 'required|in:active,on_leave,inactive',
             'location_id'      => 'nullable|exists:locations,id',
-            'responsibilities' => 'nullable|string|max:255',
             'purok_id'         => 'nullable|exists:puroks,id',
-            'birthdate'        => 'nullable|date',
+            'birthdate'        => [
+                'nullable',
+                'required_if:role,staff',
+                'date',
+                'before_or_equal:' . now()->subYears(18)->toDateString(),
+            ],
             'home_address'     => 'nullable|string|max:500',
         ]);
-
-        // Ensure the chosen purok belongs to the chosen location (prevents cross-barangay assignment)
-        if (! empty($data['purok_id']) && ! empty($data['location_id'])) {
-            $purokBelongs = Purok::where('id', $data['purok_id'])
-                ->where('location_id', $data['location_id'])
-                ->exists();
-            if (! $purokBelongs) {
-                return back()->withErrors([
-                    'purok_id' => 'The selected purok does not belong to the chosen location.',
-                ])->withInput();
-            }
-        }
-
-        $wasActive     = $user->status === 'active';
-        $isDeactivated = in_array($data['status'], ['inactive', 'on_leave'], true) && $wasActive;
 
         if (! empty($data['password'])) {
             $data['password'] = Hash::make($data['password']);
@@ -156,26 +144,17 @@ class TeamController extends Controller
             unset($data['password']);
         }
 
-        $oldPurokId = $user->purok_id;
-        $user->update($data);
+        DB::transaction(function () use ($data, $user) {
+            $purok = $this->validatePurokAssignment($data, $user->id);
+            $user->update($data);
 
-        // Purok changed: release old purok, assign new one
-        if ($oldPurokId && (string) $oldPurokId !== (string) ($data['purok_id'] ?? '')) {
-            Purok::where('id', $oldPurokId)
-                ->where('assigned_staff_id', $user->id)
-                ->update(['assigned_staff_id' => null]);
-        }
-
-        if (! empty($data['purok_id'])) {
-            Purok::where('id', $data['purok_id'])
-                ->update(['assigned_staff_id' => $user->id]);
-        }
-
-        // Staff deactivated → free their purok
-        if ($isDeactivated) {
             Purok::where('assigned_staff_id', $user->id)
                 ->update(['assigned_staff_id' => null]);
-        }
+
+            if ($purok && $data['role'] === 'staff' && $data['status'] === 'active') {
+                $purok->update(['assigned_staff_id' => $user->id]);
+            }
+        });
 
         return back()->with('success', 'Team member updated successfully.');
     }
@@ -206,6 +185,21 @@ class TeamController extends Controller
         ]);
 
         $purokId = isset($data['purok_id']) ? (int) $data['purok_id'] : null;
+
+        if ($purokId !== null) {
+            $purok = Purok::query()
+                ->whereKey($purokId)
+                ->where('location_id', $user->location_id)
+                ->where('status', 'active')
+                ->whereIn('name', array_map(fn ($number) => "Purok {$number}", range(1, 7)))
+                ->first();
+
+            if (! $purok || ($purok->assigned_staff_id !== null && (int) $purok->assigned_staff_id !== $user->id)) {
+                throw ValidationException::withMessages([
+                    'purok_id' => 'Choose an available Purok from the staff member’s barangay.',
+                ]);
+            }
+        }
 
         $this->approvalService->approve($user, $purokId);
 
@@ -258,5 +252,40 @@ class TeamController extends Controller
         } catch (\Exception $e) {
             Log::error("Failed to send welcome email to {$user->email}: {$e->getMessage()}");
         }
+    }
+
+    private function validatePurokAssignment(array $data, ?int $exceptUserId = null): ?Purok
+    {
+        if (empty($data['purok_id'])) {
+            return null;
+        }
+
+        if (empty($data['location_id']) || $data['role'] !== 'staff') {
+            throw ValidationException::withMessages([
+                'purok_id' => 'A Purok can only be assigned to staff in a selected barangay.',
+            ]);
+        }
+
+        $purok = Purok::query()
+            ->whereKey($data['purok_id'])
+            ->where('location_id', $data['location_id'])
+            ->where('status', 'active')
+            ->whereIn('name', array_map(fn ($number) => "Purok {$number}", range(1, 7)))
+            ->lockForUpdate()
+            ->first();
+
+        if (! $purok) {
+            throw ValidationException::withMessages([
+                'purok_id' => 'Choose a Purok from the selected barangay.',
+            ]);
+        }
+
+        if ($purok->assigned_staff_id !== null && (int) $purok->assigned_staff_id !== $exceptUserId) {
+            throw ValidationException::withMessages([
+                'purok_id' => 'The selected Purok is already assigned to another staff member.',
+            ]);
+        }
+
+        return $purok;
     }
 }

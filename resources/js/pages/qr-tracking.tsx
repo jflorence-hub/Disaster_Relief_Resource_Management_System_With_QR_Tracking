@@ -411,7 +411,7 @@ export default function QrTracking({
                                                 {/* Schedule sub-header */}
                                                 <div className="flex flex-wrap items-center gap-3 bg-slate-50 px-4 py-2 text-xs text-slate-500">
                                                     {selectedDaySchedules.length > 1 && (
-                                                        <span className="rounded-full bg-blue-100 px-2 py-0.5 font-semibold text-blue-700">Round {idx + 1}</span>
+                                                        <span className="rounded-full bg-blue-100 px-2 py-0.5 font-semibold text-blue-700">Batch {idx + 1}</span>
                                                     )}
                                                     {s.location_name && <span>📍 {s.location_name}</span>}
                                                     {s.resource_name  && <span>📦 {s.resource_name}</span>}

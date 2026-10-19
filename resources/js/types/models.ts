@@ -72,7 +72,6 @@ export interface ResourceItem {
     location_id: number | null;
     location?: { id: number; name: string; city?: string } | null;
     notes: string | null;
-    disaster: string | null;
     status: 'in_stock' | 'low_stock' | 'out_of_stock';
     families_coverable?: number | null;
     families_at_location?: number | null;
@@ -90,6 +89,9 @@ export interface Distribution {
         phone?: string | null;
         household_member: number;
         purok_id: number;
+        location_id?: number | null;
+        status?: string;
+        purok?: { id: number; name: string } | null;
     };
     id: number;
     qr_code: string | null;
@@ -105,6 +107,8 @@ export interface Distribution {
     distribution_date: string;
     status: 'pending' | 'in_transit' | 'completed' | 'cancelled';
     notes: string | null;
+    receiver?: string | null;
+    scanned_by?: string | null;
     resource?: { id: number; name: string; unit: string };
     additional_resource?: { id: number; name: string; unit: string } | null;
     location?: { id: number; name: string } | null;
@@ -112,6 +116,16 @@ export interface Distribution {
     assignment_mode?: 'set' | 'individual' | null;
     resource_set_id?: number | null;
     schedule_id?: number | null;
+    schedule?: {
+        id: number;
+        scheduled_at: string;
+        disaster_event?: {
+            id: number;
+            name: string;
+            type: string;
+            affected_area?: string | null;
+        } | null;
+    } | null;
     resource_set?: ResourceSet | null;
     items?: DistributionItem[];
     excluded?: boolean;
@@ -191,7 +205,6 @@ export interface TeamMember {
     phone: string | null;
     status: 'active' | 'on_leave' | 'inactive' | 'pending';
     location_id: number | null;
-    responsibilities: string | null;
     purok_id: number;
     birthdate: string | null;
     home_address: string | null;
@@ -209,6 +222,8 @@ export interface PendingStaff {
     location_id: number | null;
     location: { id: number; name: string } | null;
     preferred_purok_ids: number[] | null;
+    birthdate: string | null;
+    home_address: string | null;
     created_at: string;
 }
 
@@ -225,7 +240,6 @@ export interface ResourceSet {
     name: string;
     description: string | null;
     location_id: number | null;
-    disaster: string | null;
     created_by: number | null;
     num_sets?: number;
     sets_remaining?: number | null;

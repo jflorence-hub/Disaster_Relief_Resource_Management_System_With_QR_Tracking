@@ -4,9 +4,17 @@ import { Head, router, useForm } from '@inertiajs/react';
 import { AlertTriangle, Camera, KeyRound, User } from 'lucide-react';
 import { useRef, useState } from 'react';
 
+const staffBirthdateMax = (() => {
+    const date = new Date();
+    date.setFullYear(date.getFullYear() - 18);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+})();
+
 interface ProfileUser extends AuthUser {
     avatar?: string | null;
     avatar_url?: string | null;
+    birthdate?: string | null;
+    home_address?: string | null;
     location?: { id: number; name: string } | null;
     purok?: { id: number; name: string } | null;
     staff_id?: string | null;
@@ -17,6 +25,8 @@ interface FormData {
     name: string;
     email: string;
     phone: string;
+    birthdate: string;
+    home_address: string;
 }
 
 interface PasswordFormData {
@@ -35,6 +45,8 @@ export default function Profile({ user }: { user: ProfileUser }) {
         name: user.name ?? '',
         email: user.email ?? '',
         phone: user.phone ?? '',
+        birthdate: user.birthdate ?? '',
+        home_address: user.home_address ?? '',
     });
 
     const passwordForm = useForm<PasswordFormData>({
@@ -71,7 +83,10 @@ export default function Profile({ user }: { user: ProfileUser }) {
                 forceFormData: true,
                 preserveScroll: true,
                 onError: () =>
-                    setAvatarPreview(user.avatar_url ?? (user.avatar ? `/storage/${user.avatar}` : null)),
+                    setAvatarPreview(
+                        user.avatar_url ??
+                            (user.avatar ? `/storage/${user.avatar}` : null),
+                    ),
             },
         );
     };
@@ -92,9 +107,13 @@ export default function Profile({ user }: { user: ProfileUser }) {
                 {/* TEMP PASSWORD BANNER */}
                 {user.must_change_password && (
                     <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
-                        <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-600" />
+                        <AlertTriangle
+                            size={18}
+                            className="mt-0.5 flex-shrink-0 text-amber-600"
+                        />
                         <p className="text-sm text-amber-800">
-                            You are using a temporary password. Please change it below before continuing.
+                            You are using a temporary password. Please change it
+                            below before continuing.
                         </p>
                     </div>
                 )}
@@ -117,7 +136,7 @@ export default function Profile({ user }: { user: ProfileUser }) {
                         <button
                             type="button"
                             onClick={() => fileRef.current?.click()}
-                            className="absolute bottom-0 right-0 flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white shadow hover:bg-blue-700"
+                            className="absolute right-0 bottom-0 flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white shadow hover:bg-blue-700"
                             title="Change avatar"
                         >
                             <Camera size={13} />
@@ -133,11 +152,13 @@ export default function Profile({ user }: { user: ProfileUser }) {
 
                     {/* Identity */}
                     <div className="flex-1 text-center sm:text-left">
-                        <h2 className="text-xl font-semibold text-slate-800">{user.name}</h2>
+                        <h2 className="text-xl font-semibold text-slate-800">
+                            {user.name}
+                        </h2>
                         <p className="text-sm text-slate-500">{user.email}</p>
 
                         <div className="mt-2 flex flex-wrap justify-center gap-2 sm:justify-start">
-                            <span className="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-medium capitalize text-blue-700">
+                            <span className="rounded-full bg-blue-100 px-3 py-0.5 text-xs font-medium text-blue-700 capitalize">
                                 {user.role}
                             </span>
                             <span
@@ -158,25 +179,53 @@ export default function Profile({ user }: { user: ProfileUser }) {
                             {user.staff_id && (
                                 <>
                                     <dt className="text-slate-400">Staff ID</dt>
-                                    <dd className="font-medium text-slate-700">{user.staff_id}</dd>
+                                    <dd className="font-medium text-slate-700">
+                                        {user.staff_id}
+                                    </dd>
                                 </>
                             )}
                             {user.location && (
                                 <>
                                     <dt className="text-slate-400">Barangay</dt>
-                                    <dd className="font-medium text-slate-700">{user.location.name}</dd>
+                                    <dd className="font-medium text-slate-700">
+                                        {user.location.name}
+                                    </dd>
                                 </>
                             )}
                             {user.purok && (
                                 <>
                                     <dt className="text-slate-400">Purok</dt>
-                                    <dd className="font-medium text-slate-700">{user.purok.name}</dd>
+                                    <dd className="font-medium text-slate-700">
+                                        {user.purok.name}
+                                    </dd>
                                 </>
                             )}
                             {user.phone && (
                                 <>
                                     <dt className="text-slate-400">Phone</dt>
-                                    <dd className="font-medium text-slate-700">{user.phone}</dd>
+                                    <dd className="font-medium text-slate-700">
+                                        {user.phone}
+                                    </dd>
+                                </>
+                            )}
+                            {user.birthdate && (
+                                <>
+                                    <dt className="text-slate-400">
+                                        Date of birth
+                                    </dt>
+                                    <dd className="font-medium text-slate-700">
+                                        {user.birthdate}
+                                    </dd>
+                                </>
+                            )}
+                            {user.home_address && (
+                                <>
+                                    <dt className="text-slate-400">
+                                        Home address
+                                    </dt>
+                                    <dd className="font-medium text-slate-700">
+                                        {user.home_address}
+                                    </dd>
                                 </>
                             )}
                         </dl>
@@ -187,7 +236,9 @@ export default function Profile({ user }: { user: ProfileUser }) {
                 <div className="card">
                     <div className="mb-4 flex items-center gap-2">
                         <User size={18} className="text-slate-500" />
-                        <h2 className="font-semibold text-slate-800">Edit Profile</h2>
+                        <h2 className="font-semibold text-slate-800">
+                            Edit Profile
+                        </h2>
                     </div>
 
                     <form onSubmit={submit} className="space-y-4">
@@ -197,11 +248,15 @@ export default function Profile({ user }: { user: ProfileUser }) {
                                 type="text"
                                 className="input-field"
                                 value={form.data.name}
-                                onChange={(e) => form.setData('name', e.target.value)}
+                                onChange={(e) =>
+                                    form.setData('name', e.target.value)
+                                }
                                 required
                             />
                             {form.errors.name && (
-                                <p className="mt-1 text-xs text-red-600">{form.errors.name}</p>
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.name}
+                                </p>
                             )}
                         </div>
 
@@ -211,11 +266,15 @@ export default function Profile({ user }: { user: ProfileUser }) {
                                 type="email"
                                 className="input-field"
                                 value={form.data.email}
-                                onChange={(e) => form.setData('email', e.target.value)}
+                                onChange={(e) =>
+                                    form.setData('email', e.target.value)
+                                }
                                 required
                             />
                             {form.errors.email && (
-                                <p className="mt-1 text-xs text-red-600">{form.errors.email}</p>
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.email}
+                                </p>
                             )}
                         </div>
 
@@ -227,16 +286,67 @@ export default function Profile({ user }: { user: ProfileUser }) {
                                 placeholder="09XXXXXXXXX"
                                 maxLength={11}
                                 value={form.data.phone}
-                                onChange={(e) => form.setData('phone', e.target.value)}
+                                onChange={(e) =>
+                                    form.setData('phone', e.target.value)
+                                }
                             />
-                            <p className="mt-1 text-xs text-slate-400">Must start with 09 and be 11 digits.</p>
+                            <p className="mt-1 text-xs text-slate-400">
+                                Must start with 09 and be 11 digits.
+                            </p>
                             {form.errors.phone && (
-                                <p className="mt-1 text-xs text-red-600">{form.errors.phone}</p>
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.phone}
+                                </p>
+                            )}
+                        </div>
+
+                        <div>
+                            <label className="label">Date of birth</label>
+                            <input
+                                type="date"
+                                className="input-field"
+                                max={
+                                    user.role === 'staff'
+                                        ? staffBirthdateMax
+                                        : undefined
+                                }
+                                value={form.data.birthdate}
+                                onChange={(e) =>
+                                    form.setData('birthdate', e.target.value)
+                                }
+                                required={user.role === 'staff'}
+                            />
+                            {form.errors.birthdate && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.birthdate}
+                                </p>
+                            )}
+                        </div>
+
+                        <div>
+                            <label className="label">Home address</label>
+                            <input
+                                type="text"
+                                className="input-field"
+                                maxLength={500}
+                                value={form.data.home_address}
+                                onChange={(e) =>
+                                    form.setData('home_address', e.target.value)
+                                }
+                            />
+                            {form.errors.home_address && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {form.errors.home_address}
+                                </p>
                             )}
                         </div>
 
                         <div className="flex justify-end pt-2">
-                            <button type="submit" className="btn-primary" disabled={form.processing}>
+                            <button
+                                type="submit"
+                                className="btn-primary"
+                                disabled={form.processing}
+                            >
                                 {form.processing ? 'Saving…' : 'Save Changes'}
                             </button>
                         </div>
@@ -247,7 +357,9 @@ export default function Profile({ user }: { user: ProfileUser }) {
                 <div className="card">
                     <div className="mb-4 flex items-center gap-2">
                         <KeyRound size={18} className="text-slate-500" />
-                        <h2 className="font-semibold text-slate-800">Change Password</h2>
+                        <h2 className="font-semibold text-slate-800">
+                            Change Password
+                        </h2>
                     </div>
 
                     <form onSubmit={submitPassword} className="space-y-4">
@@ -257,7 +369,12 @@ export default function Profile({ user }: { user: ProfileUser }) {
                                 type="password"
                                 className="input-field"
                                 value={passwordForm.data.current_password}
-                                onChange={(e) => passwordForm.setData('current_password', e.target.value)}
+                                onChange={(e) =>
+                                    passwordForm.setData(
+                                        'current_password',
+                                        e.target.value,
+                                    )
+                                }
                                 autoComplete="current-password"
                                 required
                             />
@@ -274,25 +391,39 @@ export default function Profile({ user }: { user: ProfileUser }) {
                                 type="password"
                                 className="input-field"
                                 value={passwordForm.data.password}
-                                onChange={(e) => passwordForm.setData('password', e.target.value)}
+                                onChange={(e) =>
+                                    passwordForm.setData(
+                                        'password',
+                                        e.target.value,
+                                    )
+                                }
                                 autoComplete="new-password"
                                 minLength={8}
                                 required
                             />
-                            <p className="mt-1 text-xs text-slate-400">At least 8 characters.</p>
+                            <p className="mt-1 text-xs text-slate-400">
+                                At least 8 characters.
+                            </p>
                             {passwordForm.errors.password && (
-                                <p className="mt-1 text-xs text-red-600">{passwordForm.errors.password}</p>
+                                <p className="mt-1 text-xs text-red-600">
+                                    {passwordForm.errors.password}
+                                </p>
                             )}
                         </div>
 
                         <div>
-                            <label className="label">Confirm New Password</label>
+                            <label className="label">
+                                Confirm New Password
+                            </label>
                             <input
                                 type="password"
                                 className="input-field"
                                 value={passwordForm.data.password_confirmation}
                                 onChange={(e) =>
-                                    passwordForm.setData('password_confirmation', e.target.value)
+                                    passwordForm.setData(
+                                        'password_confirmation',
+                                        e.target.value,
+                                    )
                                 }
                                 autoComplete="new-password"
                                 required
@@ -310,7 +441,9 @@ export default function Profile({ user }: { user: ProfileUser }) {
                                 className="btn-primary"
                                 disabled={passwordForm.processing}
                             >
-                                {passwordForm.processing ? 'Changing…' : 'Change Password'}
+                                {passwordForm.processing
+                                    ? 'Changing…'
+                                    : 'Change Password'}
                             </button>
                         </div>
                     </form>

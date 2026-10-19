@@ -21,8 +21,12 @@ class RegisteredUserController extends Controller
 
     public function create(): Response
     {
-        $puroks = Purok::select('id', 'name', 'code')
+        $puroks = Purok::with('location:id,name')
+            ->select('id', 'name', 'code', 'location_id')
             ->where('status', 'active')
+            ->whereNotNull('location_id')
+            ->whereHas('location', fn ($query) => $query->where('status', 'active'))
+            ->whereIn('name', array_map(fn ($number) => "Purok {$number}", range(1, 7)))
             ->orderBy('name')
             ->get();
 
@@ -38,12 +42,27 @@ class RegisteredUserController extends Controller
             'purok_id' => 'required|exists:puroks,id',
         ]);
 
+        $purok = Purok::query()
+            ->whereKey($request->purok_id)
+            ->where('status', 'active')
+            ->whereNotNull('location_id')
+            ->whereHas('location', fn ($query) => $query->where('status', 'active'))
+            ->whereIn('name', array_map(fn ($number) => "Purok {$number}", range(1, 7)))
+            ->first();
+
+        if (! $purok) {
+            return back()->withErrors([
+                'purok_id' => 'Choose a Purok from an active barangay.',
+            ])->withInput();
+        }
+
         $newStaff = User::create([
             'name'     => $request->name,
             'email'    => $request->email,
             'phone'    => $request->phone,
             'password' => Hash::make(Str::random(16)),
-            'purok_id' => $request->purok_id,
+            'purok_id' => $purok->id,
+            'location_id' => $purok->location_id,
             'role'     => 'staff',
             'status'   => 'pending',
         ]);

@@ -12,35 +12,6 @@ use Inertia\Response;
 
 class ResourceController extends Controller
 {
-    /**
-     * Canonical list of disaster types used across the app.
-     * Keep this in sync with DISASTER_TYPES in resources.tsx.
-     */
-    public const DISASTER_TYPES = [
-        'Typhoon',
-        'Flood',
-        'Earthquake',
-        'Volcanic Eruption',
-        'Landslide',
-        'Tsunami',
-        'Storm Surge',
-        'Drought',
-        'Wildfire',
-        'Tornado',
-        'Hurricane',
-        'Cyclone',
-        'Flash Flood',
-        'Mudslide',
-        'Hailstorm',
-        'Blizzard',
-        'Heat Wave',
-        'Cold Wave',
-        'Industrial Accident',
-        'Oil Spill',
-        'Pandemic / Disease Outbreak',
-        'Other',
-    ];
-
     public function index(Request $request): Response
     {
         $user = $request->user();
@@ -81,14 +52,6 @@ class ResourceController extends Controller
                           ->orWhere('qr_code', 'like', "%{$search}%");
                     });
                 }
-            )
-
-            /*
-             * Disaster filter - matches one of the fixed DISASTER_TYPES values.
-             */
-            ->when(
-                $request->string('disaster')->toString(),
-                fn ($query, $disaster) => $query->where('disaster', $disaster)
             )
 
             /*
@@ -176,18 +139,12 @@ class ResourceController extends Controller
                 ->get(),
 
             /*
-             * Fixed list of disaster types - no DB query needed.
-             */
-            'disasterTypes' => self::DISASTER_TYPES,
-
-            /*
              * Send the active filters back to React.
              */
             'filters' => [
                 'search'      => $request->input('search'),
                 'category'    => $request->input('category'),
                 'location_id' => $selectedLocationId,
-                'disaster'    => $request->input('disaster'),
             ],
         ]);
     }
@@ -247,8 +204,6 @@ class ResourceController extends Controller
 
     private function validated(Request $request, ?Resource $resource = null): array
     {
-        $disasterRule = 'nullable|in:' . implode(',', self::DISASTER_TYPES);
-
         return $request->validate([
             'name'               => 'required|string|max:255',
             'category'           => 'required|in:food,water,medical,shelter,clothing,hygiene,tools,set,other',
@@ -259,7 +214,6 @@ class ResourceController extends Controller
             'expiry_date'        => 'nullable|date',
             'location_id'        => 'nullable|exists:locations,id',
             'notes'              => 'nullable|string',
-            'disaster'           => $disasterRule,
         ]);
     }
 }

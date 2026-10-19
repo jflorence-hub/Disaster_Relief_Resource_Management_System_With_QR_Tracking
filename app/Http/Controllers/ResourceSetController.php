@@ -35,7 +35,6 @@ class ResourceSetController extends Controller
                 'name'           => $data['name'],
                 'description'    => $data['description'] ?? null,
                 'location_id'    => $data['location_id'],
-                'disaster'       => $data['disaster'] ?? null,
                 'created_by'     => $request->user()->id,
                 'num_sets'       => $numSets,
                 'sets_remaining' => $numSets,
@@ -96,7 +95,6 @@ class ResourceSetController extends Controller
                 'name'           => $data['name'],
                 'description'    => $data['description'] ?? null,
                 'location_id'    => $data['location_id'],
-                'disaster'       => $data['disaster'] ?? null,
                 'num_sets'       => $newNumSets,
                 'sets_remaining' => max(0, (int) ($resourceSet->sets_remaining ?? $newNumSets) + $diff),
             ]);
@@ -204,11 +202,6 @@ class ResourceSetController extends Controller
             'name'                => ['required', 'string', 'max:255'],
             'description'         => ['nullable', 'string', 'max:1000'],
             'location_id'         => ['required', 'exists:locations,id'],
-            'disaster'            => [
-                'nullable',
-                'string',
-                'in:' . implode(',', ResourceController::DISASTER_TYPES),
-            ],
             'num_sets'            => ['nullable', 'integer', 'min:1', 'max:10000'],
             'items'               => ['required', 'array', 'min:1'],
             'items.*.resource_id' => ['required', 'exists:resources,id'],

@@ -30,32 +30,6 @@ const categories = [
     'other',
 ];
 
-// Keep in sync with ResourceController::DISASTER_TYPES
-const DISASTER_TYPES = [
-    'Typhoon',
-    'Flood',
-    'Earthquake',
-    'Volcanic Eruption',
-    'Landslide',
-    'Tsunami',
-    'Storm Surge',
-    'Drought',
-    'Wildfire',
-    'Tornado',
-    'Hurricane',
-    'Cyclone',
-    'Flash Flood',
-    'Mudslide',
-    'Hailstorm',
-    'Blizzard',
-    'Heat Wave',
-    'Cold Wave',
-    'Industrial Accident',
-    'Oil Spill',
-    'Pandemic / Disease Outbreak',
-    'Other',
-];
-
 const statusBadge: Record<string, string> = {
     in_stock: 'badge-green',
     low_stock: 'badge-amber',
@@ -71,7 +45,6 @@ interface FormData {
     expiry_date: string;
     location_id: string;
     notes: string;
-    disaster: string;
 }
 
 const emptyForm: FormData = {
@@ -83,7 +56,6 @@ const emptyForm: FormData = {
     expiry_date: '',
     location_id: '',
     notes: '',
-    disaster: '',
 };
 
 export default function Resources({
@@ -92,24 +64,19 @@ export default function Resources({
     locations,
     filters,
     userRole,
-    disasterTypes,
     expiryAlerts = [],
 }: {
     resources: ResourceItem[];
     resourceSets?: ResourceSet[];
     userRole: string;
     locations: Location[];
-    disasterTypes?: string[];
     expiryAlerts?: { id: number; name: string; days: number }[];
     filters: {
         search?: string;
         category?: string;
         location_id?: string;
-        disaster?: string;
     };
 }) {
-    const effectiveDisasterTypes = disasterTypes ?? DISASTER_TYPES;
-
     const mainWarehouse = locations.find(
         (location) =>
             location.name.trim().toLowerCase() === 'main warehouse',
@@ -121,10 +88,6 @@ export default function Resources({
     const [selectedLocation, setSelectedLocation] = useState(
         filters.location_id ??
             (mainWarehouse ? String(mainWarehouse.id) : ''),
-    );
-
-    const [selectedDisaster, setSelectedDisaster] = useState(
-        filters.disaster ?? '',
     );
 
     const [showForm, setShowForm] = useState(false);
@@ -148,7 +111,6 @@ export default function Resources({
         name: '',
         description: '',
         location_id: '',
-        disaster: '',
         num_sets: 1,
     });
     const [setFormItems, setSetFormItems] = useState<{ resource_id: string; quantity: number }[]>([]);
@@ -195,7 +157,6 @@ export default function Resources({
                 ? String(resource.location_id)
                 : '',
             notes: resource.notes ?? '',
-            disaster: resource.disaster ?? '',
         });
 
         setShowForm(true);
@@ -235,7 +196,6 @@ export default function Resources({
                 ...filters,
                 search: value,
                 location_id: selectedLocation || undefined,
-                disaster: selectedDisaster || undefined,
             },
             {
                 preserveState: true,
@@ -256,28 +216,6 @@ export default function Resources({
                 ...filters,
                 search,
                 location_id: value || undefined,
-                disaster: selectedDisaster || undefined,
-            },
-            {
-                preserveState: true,
-                replace: true,
-            },
-        );
-    };
-
-    /*
-     * DISASTER FILTER
-     */
-    const changeDisaster = (value: string) => {
-        setSelectedDisaster(value);
-
-        router.get(
-            '/resources',
-            {
-                ...filters,
-                search,
-                location_id: selectedLocation || undefined,
-                disaster: value || undefined,
             },
             {
                 preserveState: true,
@@ -316,7 +254,7 @@ export default function Resources({
     /** Open create set form */
     const openCreateSet = () => {
         setEditingSet(null);
-        setSetFormData({ name: '', description: '', location_id: '', disaster: '', num_sets: 1 });
+        setSetFormData({ name: '', description: '', location_id: '', num_sets: 1 });
         setSetFormItems([]);
         setSetFormErrors({});
         setShowSetForm(true);
@@ -329,7 +267,6 @@ export default function Resources({
             name: set.name,
             description: set.description ?? '',
             location_id: set.location_id ? String(set.location_id) : '',
-            disaster: set.disaster ?? '',
             num_sets: (set as ResourceSet & { num_sets?: number }).num_sets ?? 1,
         });
         setSetFormItems(
@@ -374,7 +311,6 @@ export default function Resources({
             name: setFormData.name,
             description: setFormData.description || null,
             location_id: setFormData.location_id ? Number(setFormData.location_id) : null,
-            disaster: setFormData.disaster || null,
             num_sets: Number(setFormData.num_sets) || 1,
             items: setFormItems.map((i) => ({
                 resource_id: Number(i.resource_id),
@@ -482,7 +418,7 @@ export default function Resources({
                             />
                         </div>
 
-                        {/* LOCATION + DISASTER + ADD RESOURCE */}
+                        {/* LOCATION + ADD RESOURCE */}
                         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                             <select
                                 disabled={userRole !== 'admin'}
@@ -498,21 +434,6 @@ export default function Resources({
                                         value={String(location.id)}
                                     >
                                         {location.name}
-                                    </option>
-                                ))}
-                            </select>
-
-                            <select
-                                className="input-field min-w-[180px]"
-                                value={selectedDisaster}
-                                onChange={(e) =>
-                                    changeDisaster(e.target.value)
-                                }
-                            >
-                                <option value="">All Disasters</option>
-                                {DISASTER_TYPES.map((d) => (
-                                    <option key={d} value={d}>
-                                        {d}
                                     </option>
                                 ))}
                             </select>
@@ -564,10 +485,6 @@ export default function Resources({
                                     </th>
 
                                     <th className="px-4 py-3">
-                                        Disaster
-                                    </th>
-
-                                    <th className="px-4 py-3">
                                         Status
                                     </th>
 
@@ -581,7 +498,7 @@ export default function Resources({
                                 {resources.length === 0 && (
                                     <tr>
                                         <td
-                                            colSpan={7}
+                                            colSpan={6}
                                             className="px-4 py-10 text-center text-slate-400"
                                         >
                                             No resources found at this
@@ -623,16 +540,6 @@ export default function Resources({
 
                                         <td className="px-4 py-3 text-slate-600">
                                             {r.location?.name ?? '—'}
-                                        </td>
-
-                                        <td className="px-4 py-3 text-slate-600">
-                                            {r.disaster ? (
-                                                <span className="inline-flex items-center rounded-md bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700 ring-1 ring-orange-200">
-                                                    {r.disaster}
-                                                </span>
-                                            ) : (
-                                                <span className="text-slate-300">—</span>
-                                            )}
                                         </td>
 
                                         <td className="px-4 py-3">
@@ -901,40 +808,6 @@ export default function Resources({
                                     />
                                 </div>
 
-                                {/* DISASTER */}
-                                <div className="sm:col-span-2">
-                                    <label className="label">
-                                        Disaster (optional)
-                                    </label>
-
-                                    <select
-                                        className="input-field"
-                                        value={form.data.disaster}
-                                        onChange={(e) =>
-                                            form.setData(
-                                                'disaster',
-                                                e.target.value,
-                                            )
-                                        }
-                                    >
-                                        <option value="">— None —</option>
-                                        {DISASTER_TYPES.map((d) => (
-                                            <option key={d} value={d}>
-                                                {d}
-                                            </option>
-                                        ))}
-                                    </select>
-
-                                    <p className="mt-1 text-xs text-slate-400">
-                                        Tag this resource to a specific type of disaster for filtering.
-                                    </p>
-
-                                    {form.errors.disaster && (
-                                        <p className="mt-1 text-xs text-red-600">
-                                            {form.errors.disaster}
-                                        </p>
-                                    )}
-                                </div>
                             </div>
 
                             {!editing && (
@@ -1060,14 +933,7 @@ export default function Resources({
                         <div key={set.id} className="card">
                             <div className="flex items-start justify-between gap-4">
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <h3 className="font-semibold text-slate-800">{set.name}</h3>
-                                        {set.disaster && (
-                                            <span className="inline-flex items-center rounded-md bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700 ring-1 ring-orange-200">
-                                                {set.disaster}
-                                            </span>
-                                        )}
-                                    </div>
+                                    <h3 className="font-semibold text-slate-800">{set.name}</h3>
                                     <p className="mt-0.5 text-sm text-slate-500">
                                         {set.items?.length ?? 0} item{(set.items?.length ?? 0) !== 1 ? 's' : ''} · {set.location?.name ?? '—'}
                                         {set.num_sets != null && (
@@ -1189,21 +1055,6 @@ export default function Resources({
                                 ))}
                             </select>
                             {setFormErrors.location_id && <p className="mt-1 text-xs text-red-600">{setFormErrors.location_id}</p>}
-                        </div>
-
-                        {/* DISASTER TAG */}
-                        <div>
-                            <label className="label">Disaster Tag (optional)</label>
-                            <select
-                                className="input-field"
-                                value={setFormData.disaster}
-                                onChange={(e) => setSetFormData((p) => ({ ...p, disaster: e.target.value }))}
-                            >
-                                <option value="">— None —</option>
-                                {effectiveDisasterTypes.map((d) => (
-                                    <option key={d} value={d}>{d}</option>
-                                ))}
-                            </select>
                         </div>
 
                         {/* NUMBER OF SETS */}

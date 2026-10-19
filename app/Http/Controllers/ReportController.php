@@ -34,6 +34,22 @@ class ReportController extends Controller
             ->orderBy('month')
             ->get();
 
+        $distributionsByEvent = (clone $distributionBase)
+            ->join('distribution_schedules as ds', 'ds.id', '=', 'distributions.schedule_id')
+            ->join('disaster_events as de', 'de.id', '=', 'ds.disaster_event_id')
+            ->where('distributions.status', 'completed')
+            ->select(
+                'de.id',
+                'de.name',
+                'de.type',
+                DB::raw('COUNT(distributions.id) as distribution_count'),
+                DB::raw('SUM(distributions.quantity) as total_quantity'),
+                DB::raw('SUM(distributions.household_member) as household_member')
+            )
+            ->groupBy('de.id', 'de.name', 'de.type')
+            ->orderByDesc('total_quantity')
+            ->get();
+
         $resourcesByLocation = Location::query()->when(!$admin, fn ($q) => $user->location_id ? $q->whereKey($user->location_id) : $q->whereRaw('1 = 0'))
             ->withCount('resources')
             ->withSum('resources', 'quantity')
@@ -65,6 +81,7 @@ class ReportController extends Controller
             'userRole' => $user->role,
             'resourcesByCategory' => $resourcesByCategory,
             'distributionsByMonth' => $distributionsByMonth,
+            'distributionsByEvent' => $distributionsByEvent,
             'resourcesByLocation' => $resourcesByLocation,
             'lowStock' => $lowStock,
             'scansByType' => $scansByType,
@@ -114,12 +131,12 @@ class ReportController extends Controller
     public function exportDistributions(Request $request): StreamedResponse
     {
         $user = $request->user();
-        $distributions = Distribution::when($user->role !== 'admin', fn ($q) => $q->where('distributed_by', $user->id))->with(['resource:id,name,unit', 'location:id,name', 'distributor:id,name'])
+        $distributions = Distribution::when($user->role !== 'admin', fn ($q) => $q->where('distributed_by', $user->id))->with(['resource:id,name,unit', 'location:id,name', 'distributor:id,name', 'schedule.disasterEvent:id,name,type'])
             ->orderByDesc('distribution_date')
             ->get();
 
-        return $this->csvResponse('distribution-report.csv', ['Date', 'Resource', 'Quantity', 'Recipient', 'Household Member', 'Location', 'Status', 'Distributed By'], $distributions->map(fn ($d) => [
-            $d->distribution_date, $d->resource?->name, $d->quantity, $d->recipient_name, $d->household_member, $d->location?->name, $d->status, $d->distributor?->name,
+        return $this->csvResponse('distribution-report.csv', ['Date', 'Disaster Event', 'Disaster Type', 'Resource', 'Quantity', 'Recipient', 'Household Member', 'Location', 'Status', 'Distributed By'], $distributions->map(fn ($d) => [
+            $d->distribution_date, $d->schedule?->disasterEvent?->name, $d->schedule?->disasterEvent?->type, $d->resource?->name, $d->quantity, $d->recipient_name, $d->household_member, $d->location?->name, $d->status, $d->distributor?->name,
         ]));
     }
 

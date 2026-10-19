@@ -1,11 +1,11 @@
 <?php
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
-use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Auth\PasswordRecoveryController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DistributionController;
+use App\Http\Controllers\DisasterEventController;
 use App\Http\Controllers\LocationController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\QrTrackingController;
@@ -44,16 +44,13 @@ Route::middleware('guest')->group(function () {
         'resetPassword',
     ])->name('password.reset');
 
-
-    Route::get('register', [RegisteredUserController::class, 'create'])->name('register');
-    Route::post('register', [RegisteredUserController::class, 'store']);
 });
 
 Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])
     ->middleware('auth')
     ->name('logout');
 
-Route::middleware(['auth', 'must.change.password'])->group(function () {
+Route::middleware(['auth', 'admin', 'must.change.password'])->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
     Route::get('messages', [StaffMessageController::class, 'index'])->name('messages.index');
     Route::post('messages', [StaffMessageController::class, 'store'])->name('messages.store');
@@ -82,6 +79,8 @@ Route::middleware(['auth', 'must.change.password'])->group(function () {
         ->only(['index', 'store', 'update', 'destroy']);
 
     Route::put('distribution-schedule', [DistributionController::class, 'updateSchedule'])->name('distribution.schedule.update');
+    Route::get('distribution-schedule/{scheduleId}', [DistributionController::class, 'showSchedule'])->name('distribution.schedule.show');
+    Route::put('distribution-schedule/{scheduleId}', [DistributionController::class, 'editSchedule'])->name('distribution.schedule.edit');
 
     Route::get('qr-tracking', [QrTrackingController::class, 'index'])->name('qr-tracking.index');
     Route::post('qr-tracking/lookup', [QrTrackingController::class, 'lookup'])->name('qr-tracking.lookup');
@@ -97,6 +96,12 @@ Route::middleware(['auth', 'must.change.password'])->group(function () {
 
     // Administrator-only areas
     Route::middleware('admin')->group(function () {
+        Route::resource('disasters', DisasterEventController::class)
+            ->only(['index', 'store', 'update', 'destroy']);
+
+        Route::delete('announcements/{announcement}', [AnnouncementController::class, 'destroy'])
+            ->name('announcements.destroy');
+
         Route::resource('team', TeamController::class)
             ->parameters(['team' => 'user'])
             ->only(['index', 'store', 'update', 'destroy']);

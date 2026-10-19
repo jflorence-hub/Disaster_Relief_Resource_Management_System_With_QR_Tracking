@@ -2,9 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\Purok;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Validation\ValidationException;
 
 class StaffApprovalService
 {
@@ -12,7 +15,7 @@ class StaffApprovalService
      * Approve a pending staff registration.
      * Activates the account, assigns the purok, and notifies the staff member.
      *
-     * @param  int|null  $purokId  The purok to assign. Null keeps the user's current purok_id (for admin-panel-assigned puroks).
+     * @param  int|null  $purokId  The purok to assign, or null for no assignment.
      */
     public function approve(User $user, ?int $purokId = null): void
     {
@@ -20,24 +23,42 @@ class StaffApprovalService
             throw new \InvalidArgumentException('User is not pending approval.');
         }
 
-        // Assign the purok selected by the admin at approval time
-        if ($purokId !== null) {
-            $user->purok_id = $purokId;
+        DB::transaction(function () use ($user, $purokId) {
+            if ($purokId !== null) {
+                $purok = Purok::query()
+                    ->whereKey($purokId)
+                    ->where('location_id', $user->location_id)
+                    ->where('status', 'active')
+                    ->whereIn('name', array_map(fn ($number) => "Purok {$number}", range(1, 7)))
+                    ->lockForUpdate()
+                    ->first();
 
-            // Mark the purok as occupied
-            \App\Models\Purok::where('id', $purokId)
-                ->update(['assigned_staff_id' => $user->id]);
-        }
+                if (! $purok || ($purok->assigned_staff_id !== null && (int) $purok->assigned_staff_id !== $user->id)) {
+                    throw ValidationException::withMessages([
+                        'purok_id' => 'Choose an available Purok from the staff member’s barangay.',
+                    ]);
+                }
+
+                Purok::where('assigned_staff_id', $user->id)
+                    ->update(['assigned_staff_id' => null]);
+                $user->purok_id = $purok->id;
+                $purok->update(['assigned_staff_id' => $user->id]);
+            } else {
+                Purok::where('assigned_staff_id', $user->id)
+                    ->update(['assigned_staff_id' => null]);
+                $user->purok_id = null;
+            }
+
+            $user->forceFill([
+                'status'               => 'active',
+                'must_change_password' => false,
+            ])->save();
+        });
 
         // Load the purok and location for the email
         $user->loadMissing(['purok:id,name', 'location:id,name']);
         $purokName    = $user->purok?->name    ?? 'your assigned purok';
         $locationName = $user->location?->name ?? 'your assigned location';
-
-        $user->forceFill([
-            'status'               => 'active',
-            'must_change_password' => false,
-        ])->save();
 
         try {
             Mail::raw(

@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -25,11 +26,13 @@ class PasswordRecoveryController extends Controller
             'email' => 'required|email',
         ]);
 
-        $user = User::where('email', $data['email'])->first();
+        $user = User::where('email', $data['email'])
+            ->where('role', 'admin')
+            ->first();
 
         if (!$user) {
             return back()->withErrors([
-                'email' => 'No account was found for this Gmail address.',
+                'email' => 'No administrator account was found for this email address.',
             ]);
         }
 
@@ -56,8 +59,9 @@ class PasswordRecoveryController extends Controller
                         ->subject('Password Recovery OTP');
                 }
             );
-        } catch (\Throwable $e) {
+        } catch (TransportExceptionInterface $e) {
             Cache::forget('password_recovery:' . $user->email);
+            Cache::forget('password_recovery_verified:' . $user->email);
 
             return back()->withErrors([
                 'email' => 'The recovery email could not be sent. Check the mail settings and try again.',
@@ -76,6 +80,11 @@ class PasswordRecoveryController extends Controller
             'email' => 'required|email',
             'otp' => 'required|digits:6',
         ]);
+
+        abort_unless(
+            User::where('email', $data['email'])->where('role', 'admin')->exists(),
+            404
+        );
 
         $stored = Cache::get(
             'password_recovery:' . $data['email']
@@ -113,9 +122,12 @@ class PasswordRecoveryController extends Controller
             ]);
         }
 
-        $user = User::where('email', $data['email'])->firstOrFail();
+        $user = User::where('email', $data['email'])
+            ->where('role', 'admin')
+            ->firstOrFail();
 
         $user->password = Hash::make($data['password']);
+        $user->must_change_password = false;
         $user->save();
 
         Cache::forget('password_recovery:' . $data['email']);

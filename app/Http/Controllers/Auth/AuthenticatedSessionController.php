@@ -29,6 +29,14 @@ class AuthenticatedSessionController extends Controller
             ])->onlyInput('email');
         }
 
+        if (Auth::user()->role !== 'admin') {
+            Auth::logout();
+
+            return back()->withErrors([
+                'email' => 'This web portal is for administrators only. Staff must use the staff app.',
+            ])->onlyInput('email');
+        }
+
         if (Auth::user()->status !== 'active') {
             Auth::logout();
 

@@ -2,7 +2,7 @@ import AppLayout from '@/layouts/app-layout';
 import ConfirmDialog from '@/components/confirm-dialog';
 import Modal from '@/components/modal';
 import { Distribution, DistributionItem, Location, ResourceItem, ResourceSet, StockWarning } from '@/types/models';
-import { Head, router, useForm } from '@inertiajs/react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
 import {
     Ban,
     CalendarPlus,
@@ -26,19 +26,21 @@ interface Family {
     phone?: string | null;
     household_member: number;
     purok_id: number;
-    status: string;
+    status?: string;
+    location_id?: number | null;
 
     purok?: {
         id: number;
         name: string;
-    };
+    } | null;
 }
 
 interface Staff {
     id: number;
     name: string;
+    location_id?: number | null;
     purok_id?: number | null;
-    purok?: { id: number; name: string } | null;
+    purok?: { id: number; name: string; location_id?: number | null } | null;
 }
 
 interface DistributionRow {
@@ -61,7 +63,6 @@ interface FormData {
     status: string;
     notes: string;
     reason: string;
-    disaster: string;
     assignment_mode: 'set' | 'individual' | '';
     resource_set_id: number | string;
     items: { resource_id: number | string; quantity: number | string }[];
@@ -73,10 +74,22 @@ interface ScheduleSummary {
     resource_name: string | null;
     location_name: string | null;
     location_id: number | null;
+    family_location_ids?: number[];
     cancelled_at: string | null;
     active_count: number;
     completed_count: number;
     cancelled_count: number;
+    disaster_event_id: number | null;
+    disaster_event_name: string | null;
+}
+
+interface DisasterEventOption {
+    id: number;
+    name: string;
+    type: string;
+    affected_area: string | null;
+    starts_on: string;
+    status: 'active' | 'completed' | 'cancelled';
 }
 
 const emptyForm: FormData = {
@@ -90,23 +103,22 @@ const emptyForm: FormData = {
     status: 'pending',
     notes: '',
     reason: '',
-    disaster: '',
     assignment_mode: '',
     resource_set_id: '',
     items: [],
 };
 
-// Keep in sync with ResourceController::DISASTER_TYPES
-const DISASTER_TYPES = [
-    'Typhoon',
-    'Flood',
-    'Earthquake',
-    'Fire',
-    'Drought',
-    'Landslide',
-    'Volcanic Eruption',
-    'Other',
-];
+function toDateTimeLocal(value: string) {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return value.slice(0, 16);
+    }
+
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+        .toISOString()
+        .slice(0, 16);
+}
 
 export default function DistributionPage({
     distributions,
@@ -122,6 +134,7 @@ export default function DistributionPage({
     allLocations = [],
     resourceSets = [],
     schedules = [],
+    disasterEvents = [],
     scheduleFamilyNeeds = { all: { families: 0, quantity: 0 }, by_location: {} },
 }: {
     distributions: Distribution[];
@@ -144,6 +157,7 @@ export default function DistributionPage({
     userRole: string;    allLocations?: { id: number; name: string }[];
     resourceSets?: ResourceSet[];
     schedules?: ScheduleSummary[];
+    disasterEvents?: DisasterEventOption[];
 }) {
     const [search, setSearch] = useState(filters.search ?? '');
     const [selectedStaffId, setSelectedStaffId] = useState('');
@@ -151,19 +165,53 @@ export default function DistributionPage({
     const [activeStatusTab, setActiveStatusTab] = useState<'all' | 'pending' | 'completed' | 'excluded'>('all');
     const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [scheduleFilterId, setScheduleFilterId] = useState("");
+    const [scheduleDetails, setScheduleDetails] = useState<ScheduleSummary | null>(null);
+    const [scheduleDistributionRows, setScheduleDistributionRows] = useState<Distribution[]>([]);
+    const [scheduleDetailsLoading, setScheduleDetailsLoading] = useState(false);
+    const [scheduleDetailsError, setScheduleDetailsError] = useState('');
+    const scheduleDetailsRequest = useRef<AbortController | null>(null);
+    const [editingScheduleDate, setEditingScheduleDate] = useState(false);
+    const [scheduleDateValue, setScheduleDateValue] = useState('');
+    const [scheduleDateError, setScheduleDateError] = useState('');
+    const [scheduleEventId, setScheduleEventId] = useState('');
+    const [newScheduleEventId, setNewScheduleEventId] = useState('');
     const [scheduleAction, setScheduleAction] = useState<{
         schedule: ScheduleSummary;
         action: 'cancel' | 'delete';
     } | null>(null);
     const [scheduleError, setScheduleError] = useState('');
 
+    const filteredSchedules = useMemo(
+        () => filterLocationId
+            ? schedules.filter((schedule) =>
+                String(schedule.location_id ?? '') === filterLocationId ||
+                schedule.family_location_ids?.includes(Number(filterLocationId)),
+            )
+            : schedules,
+        [filterLocationId, schedules],
+    );
+    const filteredStaff = useMemo(
+        () => filterLocationId
+            ? staff.filter((member) =>
+                String(member.location_id ?? member.purok?.location_id ?? '') === filterLocationId,
+            )
+            : staff,
+        [filterLocationId, staff],
+    );
+    const selectedSchedule = schedules.find(
+        (schedule) => String(schedule.id) === scheduleFilterId,
+    );
+
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
     const rowsPerPage = 15;
 
     const [scheduleValue, setScheduleValue] = useState(
-        scheduledAt || currentDate,
+        scheduledAt && scheduledAt.slice(0, 10) >= currentDate.slice(0, 10)
+            ? scheduledAt
+            : currentDate,
     );
+    const minScheduleDate = `${currentDate.slice(0, 10)}T00:00`;
 
     // Selected relief resource for the new distribution schedule
     const [scheduleResourceId, setScheduleResourceId] = useState('');
@@ -206,6 +254,11 @@ export default function DistributionPage({
 
         if (!scheduleValue) return;
 
+        if (scheduleValue.slice(0, 10) < minScheduleDate.slice(0, 10)) {
+            setScheduleError('Schedules cannot be set before today.');
+            return;
+        }
+
         if (scheduleMode === 'individual' && !scheduleResourceId) return;
         if (scheduleMode === 'set' && !scheduleResourceSetId) return;
         setScheduleError('');
@@ -213,6 +266,7 @@ export default function DistributionPage({
         // For set mode, pick the first resource from the set as the required resource_id
         const payload: Record<string, string | number | null> = {
             scheduled_at: scheduleValue,
+            disaster_event_id: newScheduleEventId ? Number(newScheduleEventId) : null,
             location_id: scheduleLocationId ? Number(scheduleLocationId) : null,
         };
 
@@ -379,6 +433,8 @@ export default function DistributionPage({
 
     const handleLocationChange = (locationId: string) => {
         setFilterLocationId(locationId);
+        setScheduleFilterId('');
+        setSelectedStaffId('');
         router.visit('/distribution', {
             data: {
                 search: search || undefined,
@@ -386,6 +442,94 @@ export default function DistributionPage({
             },
             preserveState: true,
             replace: true,
+        });
+    };
+
+    const closeScheduleDetails = () => {
+        scheduleDetailsRequest.current?.abort();
+        scheduleDetailsRequest.current = null;
+        setScheduleDetails(null);
+        setScheduleDetailsLoading(false);
+    };
+
+    const openScheduleDetails = async (schedule: ScheduleSummary) => {
+        scheduleDetailsRequest.current?.abort();
+        const controller = new AbortController();
+        scheduleDetailsRequest.current = controller;
+        setShowScheduleModal(false);
+        setScheduleFilterId(String(schedule.id));
+        setScheduleDetails(schedule);
+        setScheduleDistributionRows([]);
+        setScheduleDetailsError('');
+        setScheduleDetailsLoading(true);
+        setEditingScheduleDate(false);
+        setScheduleDateValue(toDateTimeLocal(schedule.scheduled_at));
+        setScheduleEventId(schedule.disaster_event_id ? String(schedule.disaster_event_id) : '');
+        setScheduleDateError('');
+
+        try {
+            const response = await fetch(`/distribution-schedule/${schedule.id}`, {
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                signal: controller.signal,
+            });
+
+            const result = await response.json() as {
+                distributions?: Distribution[];
+                message?: string;
+            };
+
+            if (!response.ok) {
+                throw new Error(result.message ?? 'Unable to load this schedule.');
+            }
+
+            if (scheduleDetailsRequest.current === controller) {
+                setScheduleDistributionRows(result.distributions ?? []);
+            }
+        } catch (error) {
+            if (!controller.signal.aborted && scheduleDetailsRequest.current === controller) {
+                console.error('Failed to load distribution schedule details.', error);
+                setScheduleDetailsError(error instanceof Error ? error.message : 'Unable to load this schedule.');
+            }
+        } finally {
+            if (scheduleDetailsRequest.current === controller) {
+                setScheduleDetailsLoading(false);
+            }
+        }
+    };
+
+    const saveScheduleDate = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+
+        if (!scheduleDetails || !scheduleDateValue) {
+            return;
+        }
+
+        if (scheduleDateValue.slice(0, 10) < minScheduleDate.slice(0, 10)) {
+            setScheduleDateError('Schedules cannot be set before today.');
+            return;
+        }
+
+        setScheduleDateError('');
+        router.put(`/distribution-schedule/${scheduleDetails.id}`, {
+            scheduled_at: scheduleDateValue,
+            disaster_event_id: scheduleEventId ? Number(scheduleEventId) : null,
+        }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setScheduleDetails((schedule) => schedule
+                    ? {
+                        ...schedule,
+                        scheduled_at: scheduleDateValue.replace('T', ' '),
+                        disaster_event_id: scheduleEventId ? Number(scheduleEventId) : null,
+                        disaster_event_name: disasterEvents.find((event) => String(event.id) === scheduleEventId)?.name ?? null,
+                    }
+                    : schedule);
+                setEditingScheduleDate(false);
+            },
+            onError: (errors) => setScheduleDateError(Object.values(errors)[0] ?? 'Unable to update this schedule.'),
         });
     };
 
@@ -566,7 +710,7 @@ export default function DistributionPage({
 
             location_id: distribution.location_id ?? '',
 
-            distribution_date: scheduledAt || currentDate,
+            distribution_date: toDateTimeLocal(distribution.distribution_date),
 
             status: distribution.status ?? 'pending',
 
@@ -574,7 +718,6 @@ export default function DistributionPage({
 
             reason: (distribution as Distribution & { reason?: string }).reason ?? '',
 
-            disaster: (distribution as Distribution & { disaster?: string }).disaster ?? '',
 
             assignment_mode: (distribution.assignment_mode as 'set' | 'individual' | '') ?? '',
 
@@ -634,7 +777,7 @@ export default function DistributionPage({
                     ? Number(form.data.location_id)
                     : null,
 
-            distribution_date: scheduledAt || currentDate,
+            distribution_date: form.data.distribution_date,
 
             status: form.data.status,
 
@@ -642,7 +785,6 @@ export default function DistributionPage({
 
             reason: form.data.reason || null,
 
-            disaster: form.data.disaster || null,
 
             assignment_mode: form.data.assignment_mode || null,
 
@@ -847,7 +989,11 @@ export default function DistributionPage({
                     <button
                         type="button"
                         className="btn-primary flex items-center gap-2"
-                        onClick={() => setShowScheduleModal(true)}
+                        onClick={() => {
+                            setNewScheduleEventId('');
+                            setScheduleError('');
+                            setShowScheduleModal(true);
+                        }}
                     >
                         <CalendarPlus size={16} />
                         New Schedule
@@ -937,7 +1083,7 @@ export default function DistributionPage({
                     >
                         <option value="">All Staff / Puroks</option>
 
-                        {staff.map((member) => (
+                        {filteredStaff.map((member) => (
                             <option key={member.id} value={member.id}>
                                 {member.name}
                                 {member.purok_id
@@ -949,14 +1095,14 @@ export default function DistributionPage({
                 )}
 
                 {/* SCHEDULE FILTER */}
-                {userRole === 'admin' && schedules.length > 0 && (
+                {userRole === 'admin' && filteredSchedules.length > 0 && (
                     <select
                         className="input-field sm:w-64"
                         value={scheduleFilterId}
                         onChange={(e) => setScheduleFilterId(e.target.value)}
                     >
                         <option value="">All Schedules</option>
-                        {schedules.map((s) => (
+                        {filteredSchedules.map((s) => (
                             <option key={s.id} value={String(s.id)}>
                                 #{s.id} — {new Date(s.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                                 {s.resource_name ? ` · ${s.resource_name}` : ''}
@@ -1019,9 +1165,32 @@ export default function DistributionPage({
                             type="datetime-local"
                             className="input-field"
                             value={scheduleValue}
+                            min={minScheduleDate}
                             onChange={(e) => setScheduleValue(e.target.value)}
                             required
                         />
+                    </div>
+                    <div>
+                        <label className="label">Disaster event</label>
+                        <select
+                            className="input-field"
+                            value={newScheduleEventId}
+                            onChange={(e) => setNewScheduleEventId(e.target.value)}
+                        >
+                            <option value="">No event association</option>
+                            {disasterEvents
+                                .filter((event) => event.status === 'active')
+                                .map((event) => (
+                                    <option key={event.id} value={String(event.id)}>
+                                        {event.name} ({event.type})
+                                    </option>
+                                ))}
+                        </select>
+                        {disasterEvents.length === 0 && (
+                            <p className="mt-1 text-xs text-slate-500">
+                                <Link href="/disasters" className="text-blue-600 hover:underline">Create a disaster event</Link> to link this schedule.
+                            </p>
+                        )}
                     </div>
                     <div>
                         <label className="label">Location</label>
@@ -1168,12 +1337,17 @@ export default function DistributionPage({
 
                 <div className="mt-6 border-t border-slate-200 pt-4">
                     <h3 className="mb-3 text-sm font-semibold text-slate-800">Existing schedules</h3>
-                    {schedules.length === 0 ? (
+                    {filteredSchedules.length === 0 ? (
                         <p className="text-sm text-slate-500">No schedules have been created.</p>
                     ) : (
                         <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
-                            {schedules.map((schedule) => (
-                                <div key={schedule.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 p-3">
+                            {filteredSchedules.map((schedule) => (
+                                <button
+                                    type="button"
+                                    key={schedule.id}
+                                    className="flex w-full flex-wrap items-center gap-3 rounded-lg border border-slate-200 p-3 text-left hover:border-blue-300 hover:bg-blue-50/40"
+                                    onClick={() => openScheduleDetails(schedule)}
+                                >
                                     <div className="min-w-0 flex-1">
                                         <p className="text-sm font-medium text-slate-800">
                                             {new Date(schedule.scheduled_at).toLocaleString()}
@@ -1183,34 +1357,171 @@ export default function DistributionPage({
                                         </p>
                                         <p className="truncate text-xs text-slate-500">
                                             {schedule.resource_name ?? 'Resource'}{schedule.location_name ? ` · ${schedule.location_name}` : ' · All locations'}
+                                            {schedule.disaster_event_name ? ` · ${schedule.disaster_event_name}` : ''}
                                             {' · '}{schedule.active_count} active, {schedule.completed_count} completed, {schedule.cancelled_count} cancelled
                                         </p>
                                     </div>
-                                    {schedule.active_count > 0 && !schedule.cancelled_at && (
-                                        <button
-                                            type="button"
-                                            className="inline-flex items-center gap-1 rounded-md border border-amber-200 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50"
-                                            onClick={() => setScheduleAction({ schedule, action: 'cancel' })}
-                                        >
-                                            <Ban size={13} /> Cancel
-                                        </button>
-                                    )}
-                                    {schedule.completed_count === 0 && (
-                                        <button
-                                            type="button"
-                                            className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
-                                            onClick={() => setScheduleAction({ schedule, action: 'delete' })}
-                                        >
-                                            <Trash2 size={13} /> Delete
-                                        </button>
-                                    )}
-                                </div>
+                                    <span className="text-xs font-medium text-blue-600">View details</span>
+                                </button>
                             ))}
                         </div>
                     )}
                 </div>
             </Modal>
             )} {/* end admin-only schedule modal */}
+
+            {userRole === 'admin' && scheduleDetails && (
+                <Modal
+                    open
+                    onClose={closeScheduleDetails}
+                    title={`Schedule #${scheduleDetails.id} details`}
+                    wide
+                >
+                    <div className="mb-5 grid gap-3 rounded-lg bg-slate-50 p-4 text-sm sm:grid-cols-2">
+                        <p><span className="font-medium text-slate-500">Date:</span> {new Date(scheduleDetails.scheduled_at).toLocaleString()}</p>
+                        <p><span className="font-medium text-slate-500">Barangay:</span> {scheduleDetails.location_name ?? 'All locations'}</p>
+                        <p><span className="font-medium text-slate-500">Relief:</span> {scheduleDetails.resource_name ?? 'Resource'}</p>
+                        <p><span className="font-medium text-slate-500">Disaster event:</span> {scheduleDetails.disaster_event_name ?? 'None'}</p>
+                        <p><span className="font-medium text-slate-500">Status:</span> {scheduleDetails.cancelled_at ? 'Cancelled' : 'Active'}</p>
+                        <p><span className="font-medium text-slate-500">Active:</span> {scheduleDetails.active_count}</p>
+                        <p><span className="font-medium text-slate-500">Completed:</span> {scheduleDetails.completed_count}</p>
+                        <p><span className="font-medium text-slate-500">Cancelled distributions:</span> {scheduleDetails.cancelled_count}</p>
+                    </div>
+
+                    {editingScheduleDate ? (
+                        <form onSubmit={saveScheduleDate} className="mb-5 flex flex-wrap items-end gap-3">
+                            <label className="flex-1">
+                                <span className="label">Schedule date and time</span>
+                                <input
+                                    type="datetime-local"
+                                    className="input-field"
+                                    value={scheduleDateValue}
+                                    min={minScheduleDate}
+                                    onChange={(event) => setScheduleDateValue(event.target.value)}
+                                    required
+                                />
+                            </label>
+                            <label className="flex-1">
+                                <span className="label">Disaster event</span>
+                                <select
+                                    className="input-field"
+                                    value={scheduleEventId}
+                                    onChange={(event) => setScheduleEventId(event.target.value)}
+                                >
+                                    <option value="">No event association</option>
+                                    {disasterEvents.map((event) => (
+                                        <option key={event.id} value={String(event.id)}>
+                                            {event.name} ({event.type}{event.status !== 'active' ? ` · ${event.status}` : ''})
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                            <button type="submit" className="btn-primary">Save date</button>
+                            <button type="button" className="btn-secondary" onClick={() => setEditingScheduleDate(false)}>Cancel</button>
+                            {scheduleDateError && <p className="w-full text-sm text-red-600">{scheduleDateError}</p>}
+                        </form>
+                    ) : (
+                        <div className="mb-5 flex justify-end">
+                            <button
+                                type="button"
+                                className="btn-secondary inline-flex items-center gap-2"
+                                onClick={() => setEditingScheduleDate(true)}
+                            >
+                                <Pencil size={15} /> Edit schedule
+                            </button>
+                        </div>
+                    )}
+
+                    <h3 className="mb-2 text-sm font-semibold text-slate-800">Family distributions</h3>
+                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+                        {scheduleDetailsLoading && (
+                            <p className="p-4 text-sm text-slate-500">Loading schedule details…</p>
+                        )}
+                        {scheduleDetailsError && (
+                            <p className="p-4 text-sm text-red-600">{scheduleDetailsError}</p>
+                        )}
+                        {!scheduleDetailsLoading && !scheduleDetailsError && (
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                                <tr>
+                                    <th className="px-3 py-2">Family</th>
+                                    <th className="px-3 py-2">Purok</th>
+                                    <th className="px-3 py-2">Relief</th>
+                                    <th className="px-3 py-2">Quantity</th>
+                                    <th className="px-3 py-2">Receiver</th>
+                                    <th className="px-3 py-2">Scanned by</th>
+                                    <th className="px-3 py-2">Status</th>
+                                    <th className="px-3 py-2">Notes</th>
+                                    <th className="px-3 py-2 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {scheduleDistributionRows.length === 0 ? (
+                                    <tr><td colSpan={9} className="px-3 py-6 text-center text-slate-500">No family distributions are linked to this schedule.</td></tr>
+                                ) : scheduleDistributionRows
+                                    .map((distribution) => {
+                                        const family = families.find((item) => item.id === distribution.family_id) ??
+                                            (distribution.family
+                                                ? { ...distribution.family, status: 'inactive' }
+                                                : undefined);
+                                        return (
+                                            <tr key={distribution.id} className="border-t border-slate-100">
+                                                <td className="px-3 py-2">{family?.head_name ?? distribution.recipient_name}</td>
+                                                <td className="px-3 py-2">{family?.purok?.name ?? '—'}</td>
+                                                <td className="px-3 py-2">
+                                                    {distribution.resource_set?.name ?? distribution.resource?.name ?? scheduleDetails.resource_name ?? '—'}
+                                                    {distribution.additional_resource?.name && (
+                                                        <span className="block text-xs text-purple-600">
+                                                            + {distribution.additional_resource.name} ({distribution.additional_quantity ?? 0})
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2">{distribution.quantity}</td>
+                                                <td className="px-3 py-2">{distribution.receiver || '—'}</td>
+                                                <td className="px-3 py-2">{distribution.scanned_by || '—'}</td>
+                                                <td className="px-3 py-2 capitalize">{distribution.excluded ? 'Excluded' : distribution.status.replace('_', ' ')}</td>
+                                                <td className="px-3 py-2">{distribution.notes || '—'}</td>
+                                                <td className="px-3 py-2 text-right">
+                                                    {family && (
+                                                        <button
+                                                            type="button"
+                                                            className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-800"
+                                                            onClick={() => {
+                                                                closeScheduleDetails();
+                                                                openEditDistribution(distribution, family);
+                                                            }}
+                                                        >
+                                                            <Pencil size={13} /> Edit distribution
+                                                        </button>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                            </tbody>
+                        </table>
+                        )}
+                    </div>
+                    <div className="mt-4 flex justify-end gap-2">
+                        {scheduleDetails.active_count > 0 && !scheduleDetails.cancelled_at && (
+                            <button type="button" className="btn-secondary text-amber-700" onClick={() => {
+                                setScheduleAction({ schedule: scheduleDetails, action: 'cancel' });
+                                closeScheduleDetails();
+                            }}>
+                                <Ban size={14} className="mr-1 inline" /> Cancel schedule
+                            </button>
+                        )}
+                        {scheduleDetails.completed_count === 0 && (
+                            <button type="button" className="btn-secondary text-red-600" onClick={() => {
+                                setScheduleAction({ schedule: scheduleDetails, action: 'delete' });
+                                closeScheduleDetails();
+                            }}>
+                                <Trash2 size={14} className="mr-1 inline" /> Delete schedule
+                            </button>
+                        )}
+                    </div>
+                </Modal>
+            )}
 
             <ConfirmDialog
                 open={!!scheduleAction}
@@ -1234,7 +1545,7 @@ export default function DistributionPage({
 
                             <p className="text-xs text-slate-400">
                                 {new Date(
-                                    scheduledAt || currentDate,
+                                    selectedSchedule?.scheduled_at || scheduledAt || currentDate,
                                 ).toLocaleString('en-US', {
                                     year: 'numeric',
                                     month: 'short',
@@ -1599,7 +1910,7 @@ export default function DistributionPage({
                                                 disabled={(set.available_sets ?? set.sets_remaining ?? 0) < 1
                                                     && String(form.data.resource_set_id) !== String(set.id)}
                                             >
-                                                {set.name}{set.disaster ? ` (${set.disaster})` : ''} — {set.available_sets ?? set.sets_remaining ?? 0} available
+                                                {set.name} — {set.available_sets ?? set.sets_remaining ?? 0} available
                                             </option>
                                         ))}
                                     </select>
@@ -1995,34 +2306,6 @@ export default function DistributionPage({
                                 )}
                             </div>
 
-                            {/* DISASTER */}
-
-                            <div>
-                                <label className="mb-1 block text-sm font-medium text-slate-700">
-                                    Disaster
-                                </label>
-
-                                <select
-                                    className="input-field"
-                                    value={form.data.disaster}
-                                    onChange={(e) =>
-                                        form.setData('disaster', e.target.value)
-                                    }
-                                >
-                                    <option value="">— None —</option>
-                                    {DISASTER_TYPES.map((d) => (
-                                        <option key={d} value={d}>
-                                            {d}
-                                        </option>
-                                    ))}
-                                </select>
-
-                                {form.errors.disaster && (
-                                    <p className="mt-1 text-xs text-red-500">
-                                        {form.errors.disaster}
-                                    </p>
-                                )}
-                            </div>
                         </div>
 
                         {/* BUTTONS */}

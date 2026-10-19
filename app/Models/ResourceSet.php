@@ -15,7 +15,6 @@ class ResourceSet extends Model
         'name',
         'description',
         'location_id',
-        'disaster',
         'created_by',
         'num_sets',
         'sets_remaining',

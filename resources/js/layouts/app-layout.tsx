@@ -1,6 +1,7 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import {
     FileText,
+    Flame,
     House,
     LayoutDashboard,
     LogOut,
@@ -15,21 +16,23 @@ import {
     Users,
     X,
 } from 'lucide-react';
-import { PropsWithChildren, useState } from 'react';
+import type { PropsWithChildren } from 'react';
+import { useState } from 'react';
 import type { AuthUser } from '@/types/models';
 
 const navItems = [
-    { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, adminOnly: false },
-    { href: '/resources', label: 'Resources', icon: Package, adminOnly: false },
-    { href: '/qr-tracking', label: 'QR Tracking', icon: QrCode, adminOnly: false },
-    { href: '/distribution', label: 'Distribution', icon: Truck, adminOnly: false },
-    { href: '/locations', label: 'Locations', icon: MapPin, adminOnly: false },
-    { href: '/reports', label: 'Reports', icon: FileText, adminOnly: false },
-    { href: '/messages', label: 'Messages', icon: MessageCircle, adminOnly: false },
-    { href: '/announcements', label: 'Announcements', icon: Megaphone, adminOnly: true },
-    { href: '/team', label: 'Team Management', icon: Users, adminOnly: true },
-    { href: '/families', label: 'Families', icon: House, adminOnly: false },
-    { href: '/settings', label: 'Settings', icon: Settings, adminOnly: true },
+    { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, adminOnly: false, staffHidden: false },
+    { href: '/resources', label: 'Resources', icon: Package, adminOnly: false, staffHidden: true },
+    { href: '/qr-tracking', label: 'QR Tracking', icon: QrCode, adminOnly: false, staffHidden: true },
+    { href: '/distribution', label: 'Distribution', icon: Truck, adminOnly: false, staffHidden: true },
+    { href: '/disasters', label: 'Disaster Events', icon: Flame, adminOnly: true, staffHidden: false },
+    { href: '/locations', label: 'Locations', icon: MapPin, adminOnly: false, staffHidden: true },
+    { href: '/reports', label: 'Reports', icon: FileText, adminOnly: false, staffHidden: false },
+    { href: '/messages', label: 'Messages', icon: MessageCircle, adminOnly: false, staffHidden: false },
+    { href: '/announcements', label: 'Announcements', icon: Megaphone, adminOnly: true, staffHidden: false },
+    { href: '/team', label: 'Team Management', icon: Users, adminOnly: true, staffHidden: false },
+    { href: '/families', label: 'Families', icon: House, adminOnly: false, staffHidden: false },
+    { href: '/settings', label: 'Settings', icon: Settings, adminOnly: true, staffHidden: false },
 ];
 
 interface PageProps {
@@ -79,9 +82,10 @@ export default function AppLayout({
                     <nav className="flex-1 overflow-y-auto px-3 py-4">
                         <ul className="space-y-1">
                             {navItems
-                                .filter((item) => !item.adminOnly || isAdmin)
+                                .filter((item) => (!item.adminOnly || isAdmin) && (isAdmin || !item.staffHidden))
                                 .map((item) => {
                                     const isActive = url.startsWith(item.href);
+
                                     return (
                                         <li key={item.href}>
                                             <Link

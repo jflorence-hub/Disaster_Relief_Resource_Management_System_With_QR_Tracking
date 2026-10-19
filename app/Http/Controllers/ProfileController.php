@@ -24,6 +24,8 @@ class ProfileController extends Controller
                 'name'                 => $user->name,
                 'email'                => $user->email,
                 'phone'                => $user->phone,
+                'birthdate'            => $user->birthdate?->toDateString(),
+                'home_address'         => $user->home_address,
                 'role'                 => $user->role,
                 'status'               => $user->status,
                 'must_change_password' => (bool) $user->must_change_password,
@@ -52,6 +54,13 @@ class ProfileController extends Controller
             'name'  => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email,' . $user->id],
             'phone' => ['nullable', 'regex:/^09[0-9]{9}$/'],
+            'birthdate' => [
+                'nullable',
+                'required_if:role,staff',
+                'date',
+                'before_or_equal:' . now()->subYears(18)->toDateString(),
+            ],
+            'home_address' => ['nullable', 'string', 'max:500'],
         ]);
 
         $user->fill($data)->save();
